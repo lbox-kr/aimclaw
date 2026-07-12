@@ -7,16 +7,17 @@ The two tools here solve different problems: `ask_user_question` forces a decisi
 `mcp__nanoclaw__ask_user_question({ title, question, options, timeout? })` presents the user with a set of choices and **blocks your turn** until they tap one or the timeout expires (default: 300 seconds). Returns their chosen value.
 
 `options` can be plain strings or `{ label, selectedLabel?, value? }` objects:
+
 - `label` — the button text shown before selection
-- `selectedLabel` — the text shown on the button *after* selection (useful for confirmations, e.g. `"✓ Confirmed"`)
+- `selectedLabel` — the text shown on the button _after_ selection (useful for confirmations, e.g. `"✓ Confirmed"`)
 - `value` — the string returned to you when that option is chosen (defaults to `label`)
 
 Use this when you genuinely cannot proceed without a decision. For free-text input, send a normal message and wait for their reply — don't reach for this tool.
 
 ### Structured cards (`send_card`)
 
-`mcp__nanoclaw__send_card({ card, fallbackText? })` renders a structured card and **returns immediately** — it does not pause your turn or collect a response.
+`mcp__nanoclaw__send_card({ card, fallbackText })` renders a structured card and **returns immediately** — it does not pause your turn or collect a response. `fallbackText` is required and must contain the complete essential message for notifications, screen readers, and platforms without cards.
 
-`card` supports: `title`, `description`, `children` (nested text or content blocks), and `actions` (buttons). `fallbackText` is sent as a plain message on platforms without card support.
+`card` supports `title`, `subtitle`, `description`, `imageUrl`, compact `fields` (`{ label, value }`), `children` (strings or `text` / `divider` / accessible `image` blocks), and `actions` (URL buttons). Use short fields for facts such as status, owner, version, and environment.
 
-Use this for presenting information in a cleaner format than prose: summaries, options the user can read (but you're not waiting on), or results with contextual buttons. If you need the user to actually *choose* something and return a value, use `ask_user_question` instead.
+Use this for presenting information in a cleaner format than prose: summaries, options the user can read (but you're not waiting on), or results with contextual buttons. If you need the user to actually _choose_ something and return a value, use `ask_user_question` instead.

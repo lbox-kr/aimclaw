@@ -47,6 +47,9 @@ registerChannelAdapter('slack', {
       concurrency: 'concurrent',
       supportsThreads: true,
       defaults: SLACK_DEFAULTS,
+      // Slack recommends keeping messages below 4,000 characters for
+      // readability. The bridge prefers paragraph boundaries when splitting.
+      maxTextLength: 4000,
     });
     bridge.resolveChannelName = async (platformId: string) => {
       try {

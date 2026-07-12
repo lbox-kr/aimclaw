@@ -341,6 +341,50 @@ describe('createChatSdkBridge.deliver — display cards (send_card)', () => {
     expect(msg.card).toBeDefined();
   });
 
+  it('renders subtitle, header image, fields, styled text, divider, and accessible image', async () => {
+    const { calls, postMessage } = makePostCapture();
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ postMessage }),
+      supportsThreads: false,
+    });
+    await bridge.deliver('slack:C123', 'slack:C123:1', {
+      kind: 'chat-sdk',
+      content: {
+        type: 'card',
+        fallbackText: 'Deploy succeeded in production at version 1.2.3.',
+        card: {
+          title: 'Deploy complete',
+          subtitle: 'Production',
+          imageUrl: 'https://example.com/header.png',
+          fields: [
+            { label: 'Version', value: '1.2.3' },
+            { label: 'Status', value: 'Healthy' },
+          ],
+          children: [
+            { type: 'text', text: 'All checks passed.', style: 'bold' },
+            { type: 'divider' },
+            { type: 'image', url: 'https://example.com/chart.png', alt: 'Latency stayed below 100 ms' },
+          ],
+        },
+      },
+    });
+
+    const msg = calls[0].message as {
+      card?: {
+        subtitle?: string;
+        imageUrl?: string;
+        children?: Array<{ type?: string; children?: unknown[]; style?: string; alt?: string }>;
+      };
+      fallbackText?: string;
+    };
+    expect(msg.fallbackText).toBe('Deploy succeeded in production at version 1.2.3.');
+    expect(msg.card?.subtitle).toBe('Production');
+    expect(msg.card?.imageUrl).toBe('https://example.com/header.png');
+    expect(msg.card?.children?.map((child) => child.type)).toEqual(['fields', 'text', 'divider', 'image']);
+    expect(msg.card?.children?.[1].style).toBe('bold');
+    expect(msg.card?.children?.[3].alt).toBe('Latency stayed below 100 ms');
+  });
+
   it('drops actions without url (send_card is fire-and-forget; non-URL buttons would have nowhere to land)', async () => {
     const { calls, postMessage } = makePostCapture();
     const bridge = createChatSdkBridge({

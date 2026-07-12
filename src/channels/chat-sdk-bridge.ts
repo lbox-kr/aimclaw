@@ -10,6 +10,10 @@ import {
   Chat,
   Card,
   CardText,
+  Divider,
+  Field,
+  Fields,
+  Image,
   Actions,
   Button,
   LinkButton,
@@ -466,22 +470,35 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       if (content.type === 'card' && content.card && typeof content.card === 'object') {
         const cardSpec = content.card as Record<string, unknown>;
         const title = (cardSpec.title as string) || '';
+        const subtitle = (cardSpec.subtitle as string) || undefined;
+        const imageUrl = (cardSpec.imageUrl as string) || undefined;
         const fallbackText = (content.fallbackText as string) || (cardSpec.description as string) || title || '';
 
         const cardChildren: CardChild[] = [];
         if (typeof cardSpec.description === 'string' && cardSpec.description) {
           cardChildren.push(CardText(cardSpec.description));
         }
+        if (Array.isArray(cardSpec.fields)) {
+          const fields = (cardSpec.fields as Array<Record<string, unknown>>)
+            .filter((field) => typeof field.label === 'string' && field.label && typeof field.value === 'string')
+            .map((field) => Field({ label: field.label as string, value: field.value as string }));
+          if (fields.length > 0) cardChildren.push(Fields(fields));
+        }
         if (Array.isArray(cardSpec.children)) {
           for (const child of cardSpec.children) {
             if (typeof child === 'string' && child) {
               cardChildren.push(CardText(child));
-            } else if (
-              child &&
-              typeof child === 'object' &&
-              typeof (child as Record<string, unknown>).text === 'string'
-            ) {
-              cardChildren.push(CardText((child as Record<string, string>).text));
+            } else if (child && typeof child === 'object') {
+              const spec = child as Record<string, unknown>;
+              if (spec.type === 'divider') {
+                cardChildren.push(Divider());
+              } else if (spec.type === 'image' && typeof spec.url === 'string' && typeof spec.alt === 'string') {
+                cardChildren.push(Image({ url: spec.url, alt: spec.alt }));
+              } else if (typeof spec.text === 'string') {
+                const style = spec.style;
+                const safeStyle = style === 'plain' || style === 'bold' || style === 'muted' ? style : undefined;
+                cardChildren.push(CardText(spec.text, { style: safeStyle }));
+              }
             }
           }
         }
@@ -503,12 +520,12 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           }
         }
 
-        if (cardChildren.length === 0 && !title) {
+        if (cardChildren.length === 0 && !title && !subtitle && !imageUrl) {
           log.warn('send_card payload empty, skipping delivery');
           return;
         }
 
-        const card = Card({ title, children: cardChildren });
+        const card = Card({ title, subtitle, imageUrl, children: cardChildren });
         const result = await adapter.postMessage(tid, { card, fallbackText });
         return result?.id;
       }

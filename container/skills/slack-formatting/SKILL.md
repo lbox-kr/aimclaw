@@ -1,94 +1,140 @@
 ---
 name: slack-formatting
-description: Format messages for Slack using mrkdwn syntax. Use when responding to Slack channels (folder starts with "slack_" or JID contains slack identifiers).
+description: Slack 메시지를 짧고 자연스러운 대화체와 최신 표준 Markdown, Block Kit 카드, 버튼, reaction, thread에 맞게 설계한다. Slack 목적지로 답하거나 Slack용 상태·요약·선택 UI를 만들 때 사용한다.
 ---
 
-# Slack Message Formatting (mrkdwn)
+# Slack 메시지 디자인
 
-When responding to Slack channels, use Slack's mrkdwn syntax instead of standard Markdown.
+Slack은 문서를 게시하는 곳이 아니라 대화가 이어지는 곳이다. 먼저 읽히는 짧은 답을 만들고, 구조와 UI는 이해나 행동을 실제로 돕는 만큼만 사용한다.
 
-## How to detect Slack context
+## 응답 형태 선택
 
-Check your group folder name or workspace path:
-- Folder starts with `slack_` (e.g., `slack_engineering`, `slack_general`)
-- Or check `/workspace/group/` path for `slack_` prefix
+가장 가벼운 형태부터 고른다.
 
-## Formatting reference
+1. **확인만 필요함** → `add_reaction`
+2. **간단한 답이나 결과** → 일반 메시지 1~4문장
+3. **작업 중 안내** → 짧은 중간 메시지 한 번, 이후 `edit_message` 또는 최종 결과
+4. **사용자 결정이 필요함** → `ask_user_question`과 짧은 버튼 2~3개
+5. **고정된 요약과 링크 행동** → `send_card`
+6. **긴 분석·큰 표·로그·코드·보고서** → Slack에는 3~5줄 요약, 원문은 `send_file`
 
-### Text styles
+카드나 목록을 쓸 수 있다는 이유로 쓰지 않는다. 짧은 문장이 더 자연스러우면 문장으로 답한다.
 
-| Style | Syntax | Example |
-|-------|--------|---------|
-| Bold | `*text*` | *bold text* |
-| Italic | `_text_` | _italic text_ |
-| Strikethrough | `~text~` | ~strikethrough~ |
-| Code (inline) | `` `code` `` | `inline code` |
-| Code block | ` ```code``` ` | Multi-line code |
+## 대화 리듬
 
-### Links and mentions
+- 첫 줄에서 질문에 답하거나 현재 상태를 말한다.
+- 한 문장에는 하나의 핵심만 담는다.
+- 한 문단은 한두 문장으로 끊는다.
+- 서론, 의례적인 인사, 요청 재진술, 결론 반복을 생략한다.
+- 사용자의 말투와 현재 thread의 흐름을 이어간다. 갑자기 보고서 문체로 바꾸지 않는다.
+- 세부 내용은 먼저 짧게 요약하고, 필요할 때만 펼친다.
+- 같은 답을 여러 Slack 메시지로 쪼개 보내지 않는다. 중간 메시지는 실제 작업이 길 때만 보낸다.
 
+## 시각적 문법
+
+| 내용               | 적합한 표현                         |
+| ------------------ | ----------------------------------- |
+| 한 가지 답         | 짧은 문장                           |
+| 상태·결론 강조     | 첫 문장 또는 `**짧은 label**`       |
+| 병렬 항목 3개 이상 | bullet list                         |
+| 순서가 중요한 절차 | numbered list                       |
+| 작은 비교          | Markdown table, 보통 5행 × 4열 이하 |
+| 확인할 작업        | task list                           |
+| 짧은 인용·주의     | blockquote                          |
+| 실행 가능한 선택   | `ask_user_question` 버튼            |
+| 요약 + 관련 링크   | `send_card`와 link button           |
+| 긴 결과            | 요약 + 파일                         |
+
+섹션은 보통 3개 이하로 유지한다. 한 줄짜리 섹션을 여러 개 만들지 않는다. divider는 서로 다른 큰 덩어리를 나눌 때만 사용한다.
+
+## 최신 Slack Markdown
+
+AimClaw의 Slack adapter는 표준 Markdown을 Slack의 native Markdown으로 전달한다. legacy mrkdwn을 직접 흉내 내지 않는다.
+
+````markdown
+**중요한 결론**
+
+- 병렬 항목
+- [관련 문서](https://example.com)
+
+1. 첫 단계
+2. 다음 단계
+
+- [x] 완료
+- [ ] 남은 일
+
+```ts
+const ready = true;
 ```
-<https://example.com|Link text>     # Named link
-<https://example.com>                # Auto-linked URL
-<@U1234567890>                       # Mention user by ID
-<#C1234567890>                       # Mention channel by ID
-<!here>                              # @here
-<!channel>                           # @channel
+````
+
+필요한 경우 다음도 사용할 수 있다.
+
+- `#`~`######` 크기의 header: 긴 메시지의 실제 섹션에만 사용
+- GFM table: 짧고 열 수가 적은 비교에만 사용
+- task list: 사용자가 추적할 실제 작업에만 사용
+- syntax-highlighted code block: 실행·검토할 짧은 코드에만 사용
+- blockquote: 인용, 제한, 주의사항을 짧게 분리할 때 사용
+- horizontal divider: 큰 섹션 사이에만 사용
+
+Slack은 긴 Markdown도 받을 수 있지만 AimClaw은 읽기 좋은 메시지를 위해 약 4,000자 단위로 보호 분할한다. 분할에 기대지 말고 기본 메시지는 훨씬 짧게 작성한다.
+
+## 카드와 버튼
+
+`send_card`는 본문보다 카드가 더 빠르게 이해될 때 사용한다.
+
+- title은 한 줄로 짧게 쓴다.
+- subtitle은 시간, 환경, 범위처럼 보조적인 맥락에만 사용한다.
+- description에는 결론 또는 상태를 한두 문장으로 적는다.
+- fields는 상태, 담당자, 버전처럼 짧은 key-value 정보에 사용하고 보통 6개 이하로 둔다.
+- children은 핵심 근거만 둔다. `text`, `divider`, 접근성 `alt`가 있는 `image`를 사용할 수 있다.
+- link button은 다음 행동이 명확한 링크에만 사용하고 보통 1~2개로 제한한다.
+- `fallbackText`만 읽어도 핵심 내용과 행동을 이해할 수 있게 작성한다.
+- 일반 메시지와 카드에 같은 내용을 중복하지 않는다.
+
+사용자의 답을 기다려야 하면 `send_card`가 아니라 `ask_user_question`을 쓴다. 선택지는 보통 2~3개, label은 짧고 서로 겹치지 않게 만든다.
+
+## Reaction, 수정, thread
+
+- `eyes`: 요청을 확인했고 곧 작업할 때
+- `white_check_mark`: 별도 설명 없이 완료 여부만 알리면 될 때
+- `thumbs_up`: 동의나 승인 확인이면 충분할 때
+- 중요한 결과, 실패, 판단 근거는 reaction만으로 끝내지 않는다.
+- 진행 메시지를 보냈다면 새 메시지를 계속 쌓기보다 가능한 경우 `edit_message`로 상태를 갱신한다.
+- 질문이 시작된 thread에서 계속 답한다. 새 주제가 아니면 top-level 메시지로 맥락을 끊지 않는다.
+- `@channel`, `@here`, 개인 mention은 실제로 알림이 필요한 경우에만 사용한다.
+
+## 접근성과 미학
+
+- emoji, 색, 위치만으로 의미를 전달하지 않는다. 상태를 텍스트로 함께 적는다.
+- emoji는 장식이 아니라 빠른 인지 신호로만 사용한다. 보통 한 섹션에 하나 이하다.
+- 전문용어와 약어는 팀에서 통용되지 않으면 짧게 풀어 쓴다.
+- 버튼과 링크 label은 눌렀을 때 일어나는 행동을 말한다. `여기`, `클릭` 같은 label은 피한다.
+- 표나 차트를 전달할 때 Slack 본문에도 한 줄 결론을 둔다. 큰 데이터와 접근 가능한 원본은 파일로 보낸다.
+
+## 예시
+
+간단한 완료 답변:
+
+```markdown
+반영했어요. 다음 배포부터 새 규칙으로 답합니다.
 ```
 
-### Lists
+읽기 쉬운 상태 보고:
 
-Slack supports simple bullet lists but NOT numbered lists:
+```markdown
+배포는 완료됐어요.
 
-```
-• First item
-• Second item
-• Third item
-```
-
-Use `•` (bullet character) or `- ` or `* ` for bullets.
-
-### Block quotes
-
-```
-> This is a block quote
-> It can span multiple lines
+- **버전:** `912d46aa`
+- **상태:** 정상
+- **다음 확인:** Slack에서 짧은 질문 하나 보내기
 ```
 
-### Emoji
+피해야 할 형태:
 
-Use standard emoji shortcodes: `:white_check_mark:`, `:x:`, `:rocket:`, `:tada:`
-
-## What NOT to use
-
-- **NO** `##` headings (use `*Bold text*` for headers instead)
-- **NO** `**double asterisks**` for bold (use `*single asterisks*`)
-- **NO** `[text](url)` links (use `<url|text>` instead)
-- **NO** `1.` numbered lists (use bullets with numbers: `• 1. First`)
-- **NO** tables (use code blocks or plain text alignment)
-- **NO** `---` horizontal rules
-
-## Example message
-
-```
-*Daily Standup Summary*
-
-_March 21, 2026_
-
-• *Completed:* Fixed authentication bug in login flow
-• *In Progress:* Building new dashboard widgets
-• *Blocked:* Waiting on API access from DevOps
-
-> Next sync: Monday 10am
-
-:white_check_mark: All tests passing | <https://ci.example.com/builds/123|View Build>
-```
-
-## Quick rules
-
-1. Use `*bold*` not `**bold**`
-2. Use `<url|text>` not `[text](url)`
-3. Use `•` bullets, avoid numbered lists
-4. Use `:emoji:` shortcodes
-5. Quote blocks with `>`
-6. Skip headings — use bold text instead
+- “요청하신 사항을 검토한 결과 다음과 같이 안내드립니다” 같은 긴 서론
+- 간단한 답에 제목·요약·결론을 모두 반복
+- 2개 항목을 위해 목록 생성
+- 여러 단계의 중첩 bullet
+- 로그와 긴 코드를 메시지 본문에 그대로 붙이기
+- emoji만으로 성공·실패 표시

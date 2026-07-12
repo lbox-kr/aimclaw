@@ -132,22 +132,90 @@ export const askUserQuestion: McpToolDefinition = {
 export const sendCard: McpToolDefinition = {
   tool: {
     name: 'send_card',
-    description: 'Send a structured card (interactive or display-only) to the current conversation.',
+    description:
+      'Send a structured display card to the current conversation. Use fields for compact key-value facts, children for styled text/dividers/images, and actions only for URL buttons. Use ask_user_question instead when a button must return a choice.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         card: {
           type: 'object',
-          description: 'Card structure with title, description, and optional children/actions',
+          properties: {
+            title: { type: 'string', description: 'Short card title' },
+            subtitle: { type: 'string', description: 'Optional secondary context such as time, environment, or scope' },
+            description: { type: 'string', description: 'One or two sentence outcome or summary' },
+            imageUrl: { type: 'string', description: 'Optional card header image URL' },
+            fields: {
+              type: 'array',
+              description: 'Compact key-value facts, usually six or fewer',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  value: { type: 'string' },
+                },
+                required: ['label', 'value'],
+              },
+            },
+            children: {
+              type: 'array',
+              description: 'Additional text, divider, or accessible image blocks',
+              items: {
+                oneOf: [
+                  { type: 'string' },
+                  {
+                    type: 'object',
+                    properties: {
+                      type: { type: 'string', enum: ['text'] },
+                      text: { type: 'string' },
+                      style: { type: 'string', enum: ['plain', 'bold', 'muted'] },
+                    },
+                    required: ['type', 'text'],
+                  },
+                  {
+                    type: 'object',
+                    properties: { type: { type: 'string', enum: ['divider'] } },
+                    required: ['type'],
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      type: { type: 'string', enum: ['image'] },
+                      url: { type: 'string' },
+                      alt: { type: 'string' },
+                    },
+                    required: ['type', 'url', 'alt'],
+                  },
+                ],
+              },
+            },
+            actions: {
+              type: 'array',
+              description: 'URL buttons only. Use ask_user_question for callback choices.',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  url: { type: 'string' },
+                  style: { type: 'string', enum: ['primary', 'danger', 'default'] },
+                },
+                required: ['label', 'url'],
+              },
+            },
+          },
+          description: 'Accessible card structure',
         },
-        fallbackText: { type: 'string', description: 'Text fallback for platforms without card support' },
+        fallbackText: {
+          type: 'string',
+          description: 'Complete plain-text summary for notifications, screen readers, and platforms without cards',
+        },
       },
-      required: ['card'],
+      required: ['card', 'fallbackText'],
     },
   },
   async handler(args) {
     const card = args.card as Record<string, unknown>;
-    if (!card) return err('card is required');
+    const fallbackText = args.fallbackText as string;
+    if (!card || !fallbackText?.trim()) return err('card and fallbackText are required');
 
     const id = generateId();
     const r = routing();
@@ -158,7 +226,7 @@ export const sendCard: McpToolDefinition = {
       platform_id: r.platform_id,
       channel_type: r.channel_type,
       thread_id: r.thread_id,
-      content: JSON.stringify({ type: 'card', card, fallbackText: (args.fallbackText as string) || '' }),
+      content: JSON.stringify({ type: 'card', card, fallbackText }),
     });
 
     log(`send_card: ${id}`);
