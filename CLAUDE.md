@@ -13,6 +13,12 @@ If you are a fresh install (you ran `git clone`, not `git pull`) and there are n
 
 ---
 
+# LBox AimClaw fork
+
+Before changing this repository, read and follow [`AGENTS.md`](AGENTS.md). Its product decisions
+and implementation priorities apply to AimClaw, while the NanoClaw architecture and safety rules
+below remain in force.
+
 # NanoClaw
 
 Personal AI assistant. See [README.md](README.md) for philosophy and setup. Architecture lives in `docs/`.
