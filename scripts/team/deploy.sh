@@ -12,7 +12,7 @@
 # target, and a HEAD-based check would mask the failure as up-to-date forever.
 #
 # Status contract (read by container/skills/team-update):
-#   ~/nanoclaw-deploy/status.json  {state, mode, from, to, at, detail}
+#   ~/nanoclaw-deploy/status.json  {request_id, state, mode, from, to, at, detail}
 #   ~/nanoclaw-deploy/deploy.log   append-only detail log
 #   ~/nanoclaw-deploy/deployed-sha last successfully deployed commit
 
@@ -69,6 +69,10 @@ trap 'rm -rf "$LOCK_DIR"' EXIT
 
 FROM=""
 TO=""
+REQUEST_ID="$(tr -d '[:space:]' < "$DEPLOY_DIR/trigger" 2>/dev/null || true)"
+case "$REQUEST_ID" in
+  ''|*[!A-Za-z0-9._-]*) REQUEST_ID="scheduled-$(date -u '+%Y%m%dT%H%M%SZ')" ;;
+esac
 
 # write_status <state> <mode> <detail> — atomic tmp→mv so the container skill
 # never reads a half-written file.
@@ -77,13 +81,14 @@ write_status() {
   local at tmp
   at="$(date '+%Y-%m-%dT%H:%M:%S%z')"
   tmp="$DEPLOY_DIR/.status.json.tmp"
-  printf '{"state":"%s","mode":"%s","from":"%s","to":"%s","at":"%s","detail":"%s"}\n' \
-    "$state" "$mode" "$FROM" "$TO" "$at" "$detail" > "$tmp"
+  printf '{"request_id":"%s","state":"%s","mode":"%s","from":"%s","to":"%s","at":"%s","detail":"%s"}\n' \
+    "$REQUEST_ID" "$state" "$mode" "$FROM" "$TO" "$at" "$detail" > "$tmp"
   mv "$tmp" "$DEPLOY_DIR/status.json"
   log "status: state=$state mode=$mode from=$FROM to=$TO detail=$detail"
 }
 
 log "deploy run started (repo: $REPO_ROOT)"
+write_status running "" "checking origin/main"
 
 if ! git fetch origin main; then
   write_status failed "" "git fetch origin main failed"
@@ -208,6 +213,7 @@ fi
 
 PROJECT_ROOT="$REPO_ROOT"
 source setup/lib/install-slug.sh
+write_status restarting code "service restart in progress"
 if ! launchctl kickstart -k "gui/$(id -u)/$(launchd_label)"; then
   write_status failed code "launchctl kickstart failed; will retry next run"
   exit 1

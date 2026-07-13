@@ -9,13 +9,13 @@ describe('createProvider', () => {
     expect(createProvider('claude')).toBeInstanceOf(ClaudeProvider);
   });
 
-  it('uses Haiku by default while preserving an explicit Claude model', () => {
+  it('uses Sonnet by default while preserving an explicit Claude model', () => {
     const defaultProvider = createProvider('claude') as unknown as { model?: string };
     const configuredProvider = createProvider('claude', {
       model: 'opus',
     }) as unknown as { model?: string };
 
-    expect(defaultProvider.model).toBe('haiku');
+    expect(defaultProvider.model).toBe('sonnet');
     expect(configuredProvider.model).toBe('opus');
   });
 

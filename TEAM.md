@@ -14,7 +14,7 @@ LBox 팀 공용 Slack 에이전트의 설치, 배포, 갱신과 복구 방법을
 
 ## 모델 위임
 
-Claude provider는 기본적으로 Haiku를 사용하고, 판단이 필요한 작업은 최대 effort의
+Claude provider는 기본적으로 Sonnet을 사용하고, 판단이 필요한 작업은 최대 effort의
 일회성 Opus Task에 위임한다. 명시적인 그룹별 model 설정은 이 기본값보다 우선한다.
 
 ## 사용자와 권한
@@ -133,6 +133,10 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
 ~/nanoclaw-deploy/deploy.log
 ~/nanoclaw-deploy/deployed-sha
 ```
+
+Slack에서 시작한 즉시 배포는 요청 ID가 일치하는 결과 알림 작업을 먼저 예약한다.
+코드 변경으로 서비스가 재시작되어도 이 작업은 세션 DB에 남아 새 프로세스에서 결과를
+확인하고 같은 Slack destination에 완료 또는 실패를 알린다.
 
 `status.json`의 `state`가 `failed`면 기존 프로세스는 계속 실행된다. 실패 원인을
 수정하거나 문제 커밋을 revert하면 다음 자동 배포에서 다시 시도한다.
