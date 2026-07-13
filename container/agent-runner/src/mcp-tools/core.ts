@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { findByName, getAllDestinations } from '../destinations.js';
+import { getDestinationReplyRouting } from '../db/messages-in.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
 import { getCurrentInReplyTo } from '../db/session-state.js';
 import { getSessionRouting } from '../db/session-routing.js';
@@ -78,11 +79,16 @@ function resolveRouting(
   const dest = findByName(to);
   if (!dest) return { error: `Unknown destination "${to}". Known: ${destinationList()}` };
   if (dest.type === 'channel') {
-    // If the destination is the same channel the session is bound to,
-    // preserve the thread_id so replies land in the correct thread.
+    // Prefer the destination's most recent inbound route. Scheduled tasks
+    // carry their trusted origin route on the task row, while agent-shared
+    // sessions may have a distinct thread for each named destination.
     const session = getSessionRouting();
-    const threadId =
-      session.channel_type === dest.channelType && session.platform_id === dest.platformId ? session.thread_id : null;
+    const destinationRouting = getDestinationReplyRouting(dest.channelType!, dest.platformId!);
+    const threadId = destinationRouting
+      ? destinationRouting.threadId
+      : session.channel_type === dest.channelType && session.platform_id === dest.platformId
+        ? session.thread_id
+        : null;
     return {
       channel_type: dest.channelType!,
       platform_id: dest.platformId!,

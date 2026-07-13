@@ -157,6 +157,28 @@ export function getMessageIn(id: string): MessageInRow | undefined {
   }
 }
 
+/** Most recent reply address carried by an inbound row for one destination. */
+export function getDestinationReplyRouting(
+  channelType: string,
+  platformId: string,
+): { threadId: string | null; inReplyTo: string | null } | null {
+  const inbound = openInboundDb();
+  try {
+    const row = inbound
+      .prepare(
+        `SELECT thread_id, id FROM messages_in
+          WHERE channel_type = ? AND platform_id = ?
+          ORDER BY seq DESC LIMIT 1`,
+      )
+      .get(channelType, platformId) as { thread_id: string | null; id: string } | undefined;
+    return row ? { threadId: row.thread_id, inReplyTo: row.id } : null;
+  } catch {
+    return null;
+  } finally {
+    inbound.close();
+  }
+}
+
 /**
  * Find a pending response to a question (by questionId in content).
  * Reads from inbound.db, checks processing_ack to skip already-handled responses.

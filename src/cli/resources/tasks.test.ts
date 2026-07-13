@@ -110,6 +110,50 @@ describe('tasks CLI resource', () => {
     systemDb.close();
   });
 
+  it('create carries the caller thread route into the isolated task row', async () => {
+    const chatDb = new Database(inboundDbPath('ag-1', 'chat-1'));
+    chatDb
+      .prepare(
+        `INSERT INTO messages_in
+           (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+         VALUES (?, ?, 'chat-sdk', ?, 'pending', ?, ?, ?, ?)`,
+      )
+      .run(
+        'slack-message-1',
+        2,
+        now(),
+        'slack:C1',
+        'slack',
+        'slack:C1:1712345678.000100',
+        JSON.stringify({ text: '갱신해줘' }),
+      );
+    chatDb.close();
+
+    const resp = await dispatch(
+      {
+        id: 'threaded-task',
+        command: 'tasks-create',
+        args: { prompt: 'report the result', process_after: '2026-01-15T09:00:00Z' },
+      },
+      agentCtx(),
+    );
+
+    expect(resp.ok).toBe(true);
+    if (!resp.ok) return;
+    const created = resp.data as { session_id: string };
+    const taskDb = new Database(inboundDbPath('ag-1', created.session_id), { readonly: true });
+    const route = taskDb
+      .prepare('SELECT platform_id, channel_type, thread_id FROM messages_in WHERE kind = ?')
+      .get('task');
+    taskDb.close();
+
+    expect(route).toEqual({
+      platform_id: 'slack:C1',
+      channel_type: 'slack',
+      thread_id: 'slack:C1:1712345678.000100',
+    });
+  });
+
   it('tasks-list attaches a server-rendered human table (so the container agent gets it too)', async () => {
     await dispatch(
       {

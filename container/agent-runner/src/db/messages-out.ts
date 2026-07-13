@@ -155,21 +155,20 @@ export function getUndeliveredMessages(): MessageOutRow[] {
     .all() as MessageOutRow[];
 }
 
-/**
- * True if a deliberate send with this exact destination + text already exists
- * (an MCP send_message row from the current turn). Used by the task-fire
- * final-text dispatcher to drop the turn-final <message> echo of a send the
- * agent already made — the dedup happens where the duplication originates.
- */
-export function hasIdenticalSend(platformId: string, channelType: string, text: string): boolean {
+/** True if this task occurrence already sent a user-facing message. */
+export function hasTaskSend(inReplyTo: string | null, platformId?: string, channelType?: string): boolean {
+  if (!inReplyTo) return false;
+  const destinationFilter =
+    platformId && channelType ? ' AND platform_id = $platform_id AND channel_type = $channel_type' : '';
   const row = getOutboundDb()
     .prepare(
       `SELECT 1 FROM messages_out
-        WHERE platform_id = $platform_id AND channel_type = $channel_type
-          AND (in_reply_to IS NULL OR in_reply_to = '')
-          AND json_extract(content, '$.text') = $text
+        WHERE in_reply_to = $in_reply_to
+          AND kind = 'chat'
+          AND platform_id IS NOT NULL
+          AND channel_type IS NOT NULL${destinationFilter}
         LIMIT 1`,
     )
-    .get({ $platform_id: platformId, $channel_type: channelType, $text: text });
+    .get({ $in_reply_to: inReplyTo, $platform_id: platformId ?? null, $channel_type: channelType ?? null });
   return row != null;
 }

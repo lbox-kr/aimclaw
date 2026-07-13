@@ -1,7 +1,14 @@
 import { findByName, getAllDestinations, type DestinationEntry } from './destinations.js';
-import { getPendingMessages, markProcessing, markCompleted, markScriptSkipped, type MessageInRow } from './db/messages-in.js';
-import { hasIdenticalSend, writeMessageOut } from './db/messages-out.js';
-import { getInboundDb, touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
+import {
+  getDestinationReplyRouting,
+  getPendingMessages,
+  markProcessing,
+  markCompleted,
+  markScriptSkipped,
+  type MessageInRow,
+} from './db/messages-in.js';
+import { hasTaskSend, writeMessageOut } from './db/messages-out.js';
+import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
   clearContinuation,
   clearCurrentInReplyTo,
@@ -713,7 +720,7 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
     log(`[scratchpad] ${scratchpad.slice(0, 500)}${scratchpad.length > 500 ? '…' : ''}`);
   }
 
-  const hasUnwrapped = sent === 0 && !!scratchpad;
+  const hasUnwrapped = sent === 0 && !!scratchpad && !(routing.taskFire && hasTaskSend(routing.inReplyTo));
   if (hasUnwrapped) {
     log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
   }
@@ -723,12 +730,10 @@ function dispatchResultText(text: string, routing: RoutingContext): { sent: numb
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
-  // Task fires: an explicitly-addressed final-text block is either the echo of
-  // an MCP send the agent already made this turn (drop it HERE, where the
-  // duplication originates) or the agent's only deliberate send (write it
-  // in_reply_to-null like the MCP path, or the host's task-fire suppression
-  // would discard it — zero delivery).
-  if (routing.taskFire && hasIdenticalSend(platformId, channelType, body)) {
+  // A task's MCP send is already the deliberate user-facing result. Drop any
+  // later final-text message to the same destination even when the wording
+  // differs (for example, "the report was already sent").
+  if (routing.taskFire && hasTaskSend(routing.inReplyTo, platformId, channelType)) {
     log(`Dropping turn-final echo of an already-sent task message to ${dest.name}`);
     return;
   }
@@ -736,40 +741,16 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
   // that came from this same channel+platform. In agent-shared sessions,
   // different destinations have different thread contexts — using a single
   // routing.threadId would stamp one channel's thread onto another.
-  const destRouting = resolveDestinationThread(channelType, platformId);
+  const destRouting = getDestinationReplyRouting(channelType, platformId);
   writeMessageOut({
     id: generateId(),
-    in_reply_to: destRouting?.inReplyTo ?? (routing.taskFire ? null : routing.inReplyTo),
+    in_reply_to: routing.taskFire ? null : (destRouting?.inReplyTo ?? routing.inReplyTo),
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
     thread_id: destRouting?.threadId ?? null,
     content: JSON.stringify({ text: body, _nanoclawFinal: true }),
   });
-}
-
-/**
- * Find the thread_id and message id from the most recent inbound message
- * matching the given channel+platform. Returns null if no match found.
- */
-function resolveDestinationThread(
-  channelType: string,
-  platformId: string,
-): { threadId: string | null; inReplyTo: string | null } | null {
-  try {
-    const db = getInboundDb();
-    const row = db
-      .prepare(
-        `SELECT thread_id, id FROM messages_in
-         WHERE channel_type = ? AND platform_id = ?
-         ORDER BY seq DESC LIMIT 1`,
-      )
-      .get(channelType, platformId) as { thread_id: string | null; id: string } | undefined;
-    if (row) return { threadId: row.thread_id, inReplyTo: row.id };
-  } catch (err) {
-    log(`resolveDestinationThread error: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  return null;
 }
 
 function sleep(ms: number): Promise<void> {
