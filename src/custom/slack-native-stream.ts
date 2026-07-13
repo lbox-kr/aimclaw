@@ -12,7 +12,7 @@ import type { NativeStreamChunk, NativeStreamContext } from '../channels/adapter
 import { getMessagingGroup, getMessagingGroupByPlatform } from '../db/messaging-groups.js';
 import { getDeliveryAdapter, registerDeliveryAction, registerFinalMessageDelivery } from '../delivery.js';
 import { log } from '../log.js';
-import { pauseTypingRefreshAfterDelivery } from '../modules/typing/index.js';
+import { pauseTypingRefreshAfterDelivery, updateTypingStatus } from '../modules/typing/index.js';
 import { onShutdown } from '../response-registry.js';
 import type { Session } from '../types.js';
 import { removeSlackProcessingReaction } from './slack-processing-reaction.js';
@@ -69,6 +69,12 @@ interface ActiveStream {
 }
 
 const activeStreams = new Map<string, ActiveStream>();
+
+registerDeliveryAction('set_status', async (content, session) => {
+  if (typeof content.status !== 'string') return;
+  const status = content.status.trim().slice(0, 100);
+  if (status) updateTypingStatus(session.id, status);
+});
 
 function parseRouting(value: unknown): StreamRouting | null {
   if (!value || typeof value !== 'object') return null;

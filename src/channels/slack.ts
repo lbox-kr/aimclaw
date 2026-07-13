@@ -9,7 +9,7 @@ import { createSlackAdapter } from '@chat-adapter/slack';
 import type { Message as ChatMessage } from 'chat';
 
 import { readEnvFile } from '../env.js';
-import type { ChannelDefaults, ChannelSetup, InboundMessage, NativeStreamContext } from './adapter.js';
+import type { ChannelDefaults, InboundMessage, NativeStreamContext } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -52,15 +52,6 @@ export function extractSlackStreamContext(
   return { recipientUserId, recipientTeamId };
 }
 
-function withSlackRequestThreads(hostConfig: ChannelSetup): ChannelSetup {
-  return {
-    ...hostConfig,
-    onInbound(platformId, threadId, message) {
-      return hostConfig.onInbound(platformId, anchorSlackRootDm(threadId, message), message);
-    },
-  };
-}
-
 registerChannelAdapter('slack', {
   factory: () => {
     const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN']);
@@ -86,7 +77,12 @@ registerChannelAdapter('slack', {
       maxTextLength: 4000,
     });
     const setupBridge = bridge.setup.bind(bridge);
-    bridge.setup = (hostConfig) => setupBridge(withSlackRequestThreads(hostConfig));
+    bridge.setup = (hostConfig) =>
+      setupBridge({
+        ...hostConfig,
+        onInbound: (platformId, threadId, message) =>
+          hostConfig.onInbound(platformId, anchorSlackRootDm(threadId, message), message),
+      });
     bridge.resolveChannelName = async (platformId: string) => {
       try {
         const info = await slackAdapter.fetchThread(platformId);
