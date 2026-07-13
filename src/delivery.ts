@@ -13,6 +13,7 @@ import { getRunningSessions, getActiveSessions, createPendingQuestion } from './
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-groups.js';
+import { removeSlackProcessingReaction } from './custom/slack-processing-reaction.js';
 import {
   getDueOutboundMessages,
   getDeliveredIds,
@@ -189,6 +190,14 @@ async function drainSession(session: Session): Promise<void> {
 
     // Ensure platform_message_id column exists (migration for existing sessions)
     migrateDeliveredTable(inDb);
+    const originInstance = session.messaging_group_id
+      ? getMessagingGroup(session.messaging_group_id)?.instance
+      : undefined;
+    const clearProcessingReaction = (inReplyTo: string | null) => {
+      void removeSlackProcessingReaction(inDb, inReplyTo, originInstance).catch((err) => {
+        log.warn('Slack processing reaction removal failed', { messageId: inReplyTo, err });
+      });
+    };
 
     for (const msg of undelivered) {
       try {
@@ -203,6 +212,7 @@ async function drainSession(session: Session): Promise<void> {
         // agent-to-agent routing) — the user doesn't see those and
         // shouldn't get a gap in their typing indicator for them.
         if (msg.kind !== 'system' && msg.channel_type !== 'agent') {
+          clearProcessingReaction(msg.in_reply_to);
           pauseTypingRefreshAfterDelivery(session.id);
         }
       } catch (err) {
@@ -216,6 +226,7 @@ async function drainSession(session: Session): Promise<void> {
             err,
           });
           markDeliveryFailed(inDb, msg.id);
+          clearProcessingReaction(msg.in_reply_to);
           deliveryAttempts.delete(msg.id);
         } else {
           log.warn('Message delivery failed, will retry', {

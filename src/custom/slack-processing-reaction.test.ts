@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type Database from 'better-sqlite3';
 
 import type { InboundEvent } from '../channels/adapter.js';
 
@@ -11,7 +12,7 @@ vi.mock('../channels/channel-registry.js', () => ({
   getChannelAdapterExact: mocks.getChannelAdapterExact,
 }));
 
-import { addSlackProcessingReaction } from './slack-processing-reaction.js';
+import { addSlackProcessingReaction, removeSlackProcessingReaction } from './slack-processing-reaction.js';
 
 function event(channelType = 'slack'): InboundEvent {
   return {
@@ -43,7 +44,29 @@ describe('Slack processing reaction', () => {
       content: {
         operation: 'reaction',
         messageId: '1712345678.000100',
-        emoji: 'eyes',
+        emoji: 'hourglass_flowing_sand',
+      },
+    });
+  });
+
+  it('removes the loading reaction from the replied-to Slack message', async () => {
+    const get = vi.fn().mockReturnValue({
+      channel_type: 'slack',
+      platform_id: 'slack:C1',
+      thread_id: 'slack:C1:1712345678.000100',
+      content: JSON.stringify({ _nanoclawPlatformMessageId: '1712345678.000100' }),
+    });
+    const inDb = { prepare: vi.fn().mockReturnValue({ get }) } as unknown as Database.Database;
+
+    await removeSlackProcessingReaction(inDb, '1712345678.000100:ag-1', 'slack');
+
+    expect(get).toHaveBeenCalledWith('1712345678.000100:ag-1');
+    expect(mocks.deliver).toHaveBeenCalledWith('slack:C1', 'slack:C1:1712345678.000100', {
+      kind: 'chat',
+      content: {
+        operation: 'remove_reaction',
+        messageId: '1712345678.000100',
+        emoji: 'hourglass_flowing_sand',
       },
     });
   });

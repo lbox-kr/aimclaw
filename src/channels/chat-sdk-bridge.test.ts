@@ -97,6 +97,31 @@ describe('createChatSdkBridge', () => {
   });
 });
 
+describe('createChatSdkBridge.deliver — reaction removal', () => {
+  it('delegates to the adapter removeReaction operation', async () => {
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ removeReaction }),
+      supportsThreads: true,
+    });
+
+    await bridge.deliver('slack:C1', 'slack:C1:1712345678.000100', {
+      kind: 'chat',
+      content: {
+        operation: 'remove_reaction',
+        messageId: '1712345678.000100',
+        emoji: 'hourglass_flowing_sand',
+      },
+    });
+
+    expect(removeReaction).toHaveBeenCalledWith(
+      'slack:C1:1712345678.000100',
+      '1712345678.000100',
+      'hourglass_flowing_sand',
+    );
+  });
+});
+
 describe('createChatSdkBridge — instance identity', () => {
   it('default: name === channelType === adapter.name, instance undefined', () => {
     const bridge = createChatSdkBridge({
