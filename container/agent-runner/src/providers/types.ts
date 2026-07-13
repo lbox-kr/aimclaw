@@ -71,7 +71,7 @@ export interface ProviderOptions {
   additionalDirectories?: string[];
   /**
    * Model alias (`sonnet`, `opus`, `haiku`) or full model ID. Passed through
-   * to the underlying SDK. If omitted, the SDK default is used.
+   * to the underlying SDK. If omitted, the provider's product default is used.
    */
   model?: string;
   /**

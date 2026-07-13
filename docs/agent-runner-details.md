@@ -126,7 +126,8 @@ Wraps `@anthropic-ai/claude-agent-sdk`'s `query()`.
 
 The provider takes its settings (`mcpServers`, `env`, `additionalDirectories`,
 `model`, `effort`, `assistantName`) in its constructor via `ProviderOptions`; `query()`
-only reads the per-turn `QueryInput`.
+only reads the per-turn `QueryInput`. When `model` is omitted, AimClaw uses
+`claude-haiku-4-5-20251001`; an explicit per-group model setting overrides it.
 
 ```typescript
 class ClaudeProvider implements AgentProvider {
