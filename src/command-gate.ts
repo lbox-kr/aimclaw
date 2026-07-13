@@ -7,7 +7,7 @@
  *   "Permission denied" response written directly to messages_out
  * - Normal messages: pass through unchanged
  */
-import { hasAdminPrivilege } from './modules/permissions/db/user-roles.js';
+import { hasAdminPrivilege, isGlobalAdmin, isOwner } from './modules/permissions/db/user-roles.js';
 
 export type GateResult = { action: 'pass' } | { action: 'filter' } | { action: 'deny'; command: string };
 
@@ -22,9 +22,16 @@ const ADMIN_COMMANDS = new Set(['/clear', '/compact', '/context', '/cost', '/fil
  */
 export function gateCommand(content: string, userId: string | null, agentGroupId: string): GateResult {
   let text: string;
+  let memberCommands: string[] | undefined;
   try {
     const parsed = JSON.parse(content);
     text = (parsed.text || '').trim();
+    const policy = parsed._nanoclawAuthorization;
+    if (policy?.role === 'member' && Array.isArray(policy.allowedCommands)) {
+      memberCommands = policy.allowedCommands;
+    } else if (policy?.role === 'administrator') {
+      memberCommands = [];
+    }
   } catch {
     text = content.trim();
   }
@@ -35,18 +42,11 @@ export function gateCommand(content: string, userId: string | null, agentGroupId
 
   if (FILTERED_COMMANDS.has(command)) return { action: 'filter' };
 
-  if (ADMIN_COMMANDS.has(command)) {
-    if (isAdmin(userId, agentGroupId)) {
-      return { action: 'pass' };
-    }
-    return { action: 'deny', command };
+  if (memberCommands === undefined) {
+    if (!ADMIN_COMMANDS.has(command)) return { action: 'pass' };
+    return userId && hasAdminPrivilege(userId, agentGroupId) ? { action: 'pass' } : { action: 'deny', command };
   }
 
-  // Unknown slash commands pass through (the agent/SDK handles them)
-  return { action: 'pass' };
-}
-
-function isAdmin(userId: string | null, agentGroupId: string): boolean {
-  if (!userId) return false;
-  return hasAdminPrivilege(userId, agentGroupId);
+  if (userId && (isOwner(userId) || isGlobalAdmin(userId))) return { action: 'pass' };
+  return memberCommands.includes(command) ? { action: 'pass' } : { action: 'deny', command };
 }

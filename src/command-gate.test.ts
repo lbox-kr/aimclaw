@@ -58,7 +58,7 @@ describe('admin gating goes through roles', () => {
     expect(gateCommand('/clear', 'telegram:owner', 'ag-1')).toEqual({ action: 'pass' });
   });
 
-  it('allows an admin command from a scoped admin of the group', () => {
+  it('keeps scoped admin behavior without the AimClaw policy and limits it when policy is present', () => {
     seedUser('telegram:admin');
     grantRole({
       user_id: 'telegram:admin',
@@ -68,7 +68,24 @@ describe('admin gating goes through roles', () => {
       granted_at: now(),
     });
     expect(gateCommand('/clear', 'telegram:admin', 'ag-1')).toEqual({ action: 'pass' });
+    expect(
+      gateCommand(
+        JSON.stringify({ text: '/clear', _nanoclawAuthorization: { role: 'member', allowedCommands: [] } }),
+        'telegram:admin',
+        'ag-1',
+      ),
+    ).toEqual({ action: 'deny', command: '/clear' });
     expect(gateCommand('/clear', 'telegram:admin', 'ag-2')).toEqual({ action: 'deny', command: '/clear' });
+  });
+
+  it('allows only explicitly allowlisted member commands when policy is present', () => {
+    const content = (text: string) =>
+      JSON.stringify({ text, _nanoclawAuthorization: { role: 'member', allowedCommands: ['/welcome'] } });
+    expect(gateCommand(content('/welcome'), 'telegram:member', 'ag-1')).toEqual({ action: 'pass' });
+    expect(gateCommand(content('/whatever'), 'telegram:member', 'ag-1')).toEqual({
+      action: 'deny',
+      command: '/whatever',
+    });
   });
 });
 

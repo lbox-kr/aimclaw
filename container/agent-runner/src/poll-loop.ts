@@ -20,6 +20,7 @@ import {
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
+import { setExecutionPolicyForMessages } from './execution-policy.js';
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
@@ -230,6 +231,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
+    setExecutionPolicyForMessages(keep);
     const query = config.provider.query({
       prompt,
       continuation,
@@ -423,6 +425,7 @@ export async function processQuery(
         const prompt = formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
+        setExecutionPolicyForMessages(keep);
         query.push(prompt);
         archivePrompts.push(prompt);
         markCompleted(keptIds);

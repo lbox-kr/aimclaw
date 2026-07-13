@@ -109,6 +109,15 @@ export function setSenderScopeGate(fn: SenderScopeGateFn): void {
   senderScopeGate = fn;
 }
 
+export type RequestPolicyResolverFn = (event: InboundEvent, userId: string | null, agentGroupId: string) => void;
+
+let requestPolicyResolver: RequestPolicyResolverFn | null = null;
+
+export function setRequestPolicyResolver(fn: RequestPolicyResolverFn): void {
+  if (requestPolicyResolver) log.warn('Request policy resolver overwritten');
+  requestPolicyResolver = fn;
+}
+
 /**
  * Message-interceptor hook. Runs at the very top of routeInbound, before
  * messaging-group resolution. When an interceptor returns true the message is
@@ -331,6 +340,10 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
 
     const engages = evaluateEngage(agent, messageText, isMention, mg, effectiveThreadId);
 
+    // The optional resolver runs before access checks so an installed module
+    // can admit a trusted platform user and resolve one policy in one pass.
+    if (engages && requestPolicyResolver) requestPolicyResolver(event, userId, agent.agent_group_id);
+
     const accessOk = engages && (!accessGate || accessGate(event, userId, mg, agent.agent_group_id).allowed);
     const scopeOk = engages && (!senderScopeGate || senderScopeGate(event, userId, mg, agent).allowed);
 
@@ -497,7 +510,7 @@ async function deliverToAgent(
         platformId: deliveryAddr.platformId,
         channelType: deliveryAddr.channelType,
         threadId: deliveryAddr.threadId,
-        content: JSON.stringify({ text: `Permission denied: ${gate.command} requires admin access.` }),
+        content: JSON.stringify({ text: `일반 사용자는 허용된 커맨드만 실행할 수 있습니다: ${gate.command}` }),
       });
       log.info('Admin command denied by gate', { command: gate.command, userId, agentGroupId: agent.agent_group_id });
       return;

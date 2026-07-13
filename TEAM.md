@@ -12,6 +12,57 @@ LBox 팀 공용 Slack 에이전트의 설치, 배포, 갱신과 복구 방법을
 
 `groups/`, `data/`, `.env`는 운영 머신의 상태이며 Git으로 관리하지 않는다.
 
+## 사용자와 권한
+
+사용자에게는 `관리자`, `일반 사용자` 두 용어만 사용한다. 내부적으로 최초 관리자는
+전역 `owner`, 추가 관리자는 전역 `admin`, 일반 사용자는 기존
+`agent_group_members`에 저장한다.
+
+### 최초 관리자
+
+Mini 설치 절차에서 전달한 운영자가 기존 첫 에이전트 초기화의 `owner`로 등록된다.
+
+### 관리자 추가·삭제
+
+관리자는 Slack DM이나 봇을 멘션한 채널에서 다음 명령을 사용한다. 호스트가 발신자
+ID와 역할 DB를 확인해 직접 처리하며, 마지막 관리자는 자신을 삭제할 수 없다.
+
+```text
+관리자 추가 @사용자
+관리자 삭제 @사용자
+
+@AimClaw 관리자 추가 @사용자
+@AimClaw 관리자 삭제 @사용자
+```
+
+### 일반 사용자 등록
+
+Slack 앱이 받은 사람의 DM·멘션은 해당 에이전트의 일반 사용자로 자동 등록한다.
+다른 채널의 미등록 사용자 정책은 바뀌지 않는다.
+
+### 일반 사용자 화이트리스트
+
+`container/skills/team-user-access/allowlist.json`에서 관리한다.
+
+- `tools`: 일반 대화에서 항상 허용할 가벼운 도구
+- `commands`: 허용할 슬래시 커맨드
+- `skills`: 스킬 이름과 그 스킬에 필요한 도구 목록. `Skill`을 반드시 포함한다.
+
+```json
+{
+  "tools": ["WebSearch", "WebFetch"],
+  "commands": ["/clear"],
+  "skills": {
+    "team-search": ["Skill", "WebSearch", "WebFetch"],
+    "team-notify": ["Skill", "mcp__nanoclaw__send_*"]
+  }
+}
+```
+
+선택한 허용 스킬의 도구만 현재 요청에 합산된다. 새 사용자의 요청이 오면 합산
+상태가 초기화된다. 파일 변경은 다음 요청부터 적용되며, 새 스킬 파일을 추가했다면
+그룹 컨테이너를 재시작한다.
+
 ## Mini 설치 절차
 
 개발 머신이 아니라 실제 운영할 Mac mini에서 진행한다.
@@ -28,6 +79,7 @@ LBox 팀 공용 Slack 에이전트의 설치, 배포, 갱신과 복구 방법을
    - 에이전트 이름과 필요한 provider 인증 정보
 3. 코딩 에이전트가 `.env` 작성, `bash nanoclaw.sh`, Slack wiring과 응답 확인을 진행한다.
 4. 배포 디렉터리를 allowlist와 에이전트 그룹에 연결한다.
+
    ```bash
    pnpm exec tsx setup/index.ts --step mounts --force -- --json \
      '{"allowedRoots":[{"path":"~/nanoclaw-deploy","allowReadWrite":true,"description":"team deploy trigger"}],"blockedPatterns":[]}'
@@ -36,6 +88,7 @@ LBox 팀 공용 Slack 에이전트의 설치, 배포, 갱신과 복구 방법을
    pnpm exec tsx scripts/q.ts data/v2.db \
      "UPDATE container_configs SET additional_mounts='[{\"hostPath\":\"~/nanoclaw-deploy\",\"containerPath\":\"deploy\",\"readonly\":false}]' WHERE agent_group_id='<id>'"
    ```
+
 5. 자동 배포 launchd를 설치한다.
    ```bash
    bash scripts/team/install-autodeploy.sh

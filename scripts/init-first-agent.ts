@@ -347,12 +347,7 @@ async function main(): Promise<void> {
     sender: args.displayName,
   });
 
-  const roleLabel =
-    args.role === 'owner'
-      ? 'owner (global)'
-      : args.role === 'admin'
-        ? `admin (scoped to ${ag.id})`
-        : 'member';
+  const roleLabel = args.role === 'member' ? '일반 사용자' : '관리자';
 
   console.log('');
   console.log('Init complete.');
