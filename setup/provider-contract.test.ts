@@ -68,9 +68,20 @@ describe('setup carries the picked provider to creation via a setup-run env var'
 describe('AimClaw keeps one team identity', () => {
   it('defines 에이미 and AIM in the tracked runtime contract', () => {
     const contract = read('container/CLAUDE.md');
+    const identity = contract.split('## Workspace and memory')[0];
     expect(contract).toContain('# 에이미');
     expect(contract).toContain('LBox AIM 스쿼드');
     expect(contract).not.toContain('NanoClaw');
+    expect(identity).not.toContain('개인 봇');
+    expect(identity).not.toContain('전용 에이전트');
+    expect(identity).not.toContain('팀 공용 봇');
+    expect(identity).toContain('정체성 질문에는 이름과 AIM 소속을 한두 문장으로 바로 답한다');
+  });
+
+  it('keeps onboarding out of ordinary identity questions', () => {
+    const welcome = read('container/skills/welcome/SKILL.md');
+    expect(welcome).toContain('명시적인 환영 요청을 받았을 때만 사용한다');
+    expect(welcome).toContain('질문이나 작업을 이미 요청했다면 환영 절차를 실행하지 않고');
   });
 
   for (const file of ['scripts/init-first-agent.ts', 'scripts/init-cli-agent.ts']) {
