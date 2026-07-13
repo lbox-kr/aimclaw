@@ -113,7 +113,7 @@ describe('request authorization', () => {
     const member = JSON.parse(memberEvent.message.content)._nanoclawAuthorization;
     expect(member).toMatchObject({
       role: 'member',
-      allowedTools: ['WebSearch', 'WebFetch'],
+      allowedTools: ['WebSearch', 'WebFetch', 'mcp__nanoclaw__read_current_thread'],
       allowedCommands: [],
       skillTools: {},
     });

@@ -111,6 +111,15 @@ export interface ConversationInfo {
   isGroup: boolean;
 }
 
+/** Minimal, platform-neutral message shape returned for current-thread context. */
+export interface ThreadHistoryMessage {
+  id: string;
+  sender: string;
+  senderId: string;
+  text: string;
+  timestamp: string;
+}
+
 /** Wiring/mg defaults for one conversation context (DM vs group/channel). */
 export interface ChannelContextDefaults {
   /** Default engage_mode for wirings created in this context. */
@@ -200,6 +209,16 @@ export interface ChannelAdapter {
   setTyping?(platformId: string, threadId: string | null): Promise<void>;
   syncConversations?(): Promise<ConversationInfo[]>;
   resolveChannelName?(platformId: string): Promise<string | null>;
+
+  /**
+   * Read recent messages from an already-addressed platform thread.
+   *
+   * This is intentionally narrower than channel search: callers must already
+   * hold the exact thread id from a routed session. The host uses it to give
+   * the agent missing conversational context without exposing arbitrary
+   * channel/thread coordinates to the container.
+   */
+  fetchThreadMessages?(threadId: string, limit: number): Promise<ThreadHistoryMessage[]>;
 
   /**
    * Subscribe the bot to a thread so follow-up messages route via the
