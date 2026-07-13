@@ -8,8 +8,9 @@ separately.
 
 Templates are purely additive: no DB migration, no new dependency. **Templates
 are resolved only from a local directory**: `templates/` at the
-project root by default (committed but shipped empty), or whatever
-`NANOCLAW_TEMPLATES_DIR` points at (a local path only). The public registry
+project root by default, or whatever `NANOCLAW_TEMPLATES_DIR` points at (a
+local path only). Upstream leaves it empty; product forks may keep team-owned
+templates here. The public registry
 ([`nanocoai/nanoclaw-templates`](https://github.com/nanocoai/nanoclaw-templates))
 is a manual copy source — clone or download it yourself and copy the chosen
 template into your local `templates/` before stamping.

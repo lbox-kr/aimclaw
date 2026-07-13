@@ -1,7 +1,7 @@
 # Templates
 
-Local agent-template library for this NanoClaw install. **This folder ships
-empty.** Anything you drop here is a template you can stamp into an agent:
+Local template library for team-owned and operator-added agents. Stamp a
+template with:
 
 ```bash
 ncl groups create --template <relative-ref> --name "My Agent"

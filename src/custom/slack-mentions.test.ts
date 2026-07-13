@@ -46,7 +46,7 @@ describe('collectSlackInlineMentions', () => {
   it('does nothing for non-Slack messages', async () => {
     const getUser = vi.fn();
     const adapter = { name: 'discord', getUser } as unknown as Adapter;
-    const message = { text: '@Amy hi', raw: { text: '<@U_BOT> hi' } } as unknown as ChatMessage;
+    const message = { text: '@Aimy hi', raw: { text: '<@U_BOT> hi' } } as unknown as ChatMessage;
 
     await expect(collectSlackInlineMentions(adapter, message)).resolves.toEqual([]);
     expect(getUser).not.toHaveBeenCalled();

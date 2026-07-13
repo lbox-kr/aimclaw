@@ -15,7 +15,11 @@ vi.mock('./log.js', () => ({
 }));
 
 import { composeGroupClaudeMd } from './claude-md-compose.js';
-import { ensureContainerConfig, updateContainerConfigScalars } from './db/container-configs.js';
+import {
+  ensureContainerConfig,
+  updateContainerConfigJson,
+  updateContainerConfigScalars,
+} from './db/container-configs.js';
 import { closeDb, createAgentGroup, initTestDb, runMigrations } from './db/index.js';
 import { PERSONA_PREPEND_FILE } from './group-persona.js';
 import type { AgentGroup } from './types.js';
@@ -114,5 +118,25 @@ describe('composeGroupClaudeMd scheduling instructions (ncl tasks reach-in)', ()
     const imports = importsOf(ag.folder);
     expect(imports).not.toContain('@./.claude-fragments/module-scheduling.md');
     expect(imports).not.toContain('@./.claude-fragments/module-cli.md');
+  });
+});
+
+describe('composeGroupClaudeMd skill instructions', () => {
+  it('imports instructions only from explicitly enabled skills and prunes stale fragments', () => {
+    const ag = group('ag-skills', 'skills-group');
+    seed(ag);
+
+    composeGroupClaudeMd(ag);
+    expect(importsOf(ag.folder)).toContain('@./.claude-fragments/skill-slack-formatting.md');
+
+    updateContainerConfigJson(ag.id, 'skills', ['onecli-gateway']);
+    composeGroupClaudeMd(ag);
+
+    const imports = importsOf(ag.folder);
+    expect(imports).toContain('@./.claude-fragments/skill-onecli-gateway.md');
+    expect(imports).not.toContain('@./.claude-fragments/skill-slack-formatting.md');
+    expect(fs.existsSync(path.join(GROUPS_DIR, ag.folder, '.claude-fragments', 'skill-slack-formatting.md'))).toBe(
+      false,
+    );
   });
 });

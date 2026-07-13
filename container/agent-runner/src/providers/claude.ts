@@ -559,7 +559,7 @@ export class ClaudeProvider implements AgentProvider {
     this.assistantName = options.assistantName;
     this.mcpServers = options.mcpServers ?? {};
     this.additionalDirectories = options.additionalDirectories;
-    this.model = options.model ?? 'haiku';
+    this.model = options.model ?? 'sonnet';
     this.effort = options.effort;
     this.env = {
       ...(options.env ?? {}),
