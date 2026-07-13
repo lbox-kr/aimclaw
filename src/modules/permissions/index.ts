@@ -347,6 +347,7 @@ async function wireApprovedChannel(
   }
 
   const mgaId = `mga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const channelType = mg?.channel_type ?? event.channelType;
   createMessagingGroupAgent({
     id: mgaId,
     messaging_group_id: row.messaging_group_id,
@@ -354,10 +355,11 @@ async function wireApprovedChannel(
     engage_mode: engage.engage_mode,
     engage_pattern: engage.engage_pattern,
     // Deliberate card-flow choices, not channel defaults: the triggering
-    // sender is auto-admitted below, so 'known' keeps other strangers gated;
-    // 'accumulate' / 'shared' / priority 0 are the flow's fixed semantics.
+    // sender is auto-admitted below, so 'known' keeps other strangers gated.
+    // AimClaw reads missing Slack context on demand after invocation instead
+    // of persisting every unaddressed channel message in advance.
     sender_scope: 'known',
-    ignored_message_policy: 'accumulate',
+    ignored_message_policy: channelType === 'slack' ? 'drop' : 'accumulate',
     session_mode: 'shared',
     priority: 0,
     created_at: new Date().toISOString(),

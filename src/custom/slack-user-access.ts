@@ -205,7 +205,9 @@ registerMessageInterceptor(async (event) => {
         engage_mode: engage.engage_mode,
         engage_pattern: engage.engage_pattern,
         sender_scope: 'known',
-        ignored_message_policy: 'accumulate',
+        // Missing context is fetched on demand through read_current_thread
+        // after a real invocation. Plain channel traffic stays unpersisted.
+        ignored_message_policy: 'drop',
         session_mode: 'shared',
         priority: 0,
         created_at: now,
