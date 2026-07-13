@@ -33,6 +33,7 @@ import {
   deletePendingQuestion,
 } from './index.js';
 import { moduleAimClawSlackOnDemandHistory } from './migrations/module-aimclaw-slack-on-demand-history.js';
+import { moduleAimClawSlackExplicitMentions } from './migrations/module-aimclaw-slack-explicit-mentions.js';
 
 function now() {
   return new Date().toISOString();
@@ -73,7 +74,7 @@ describe('migrations', () => {
     expect(col!.dflt_value).toBeNull();
   });
 
-  it('moves existing mention-gated Slack groups to on-demand history', () => {
+  it('moves existing Slack groups to explicit mentions and on-demand history', () => {
     const db = initTestDb();
     runMigrations(db);
     createAgentGroup({
@@ -111,15 +112,14 @@ describe('migrations', () => {
     }
 
     moduleAimClawSlackOnDemandHistory.up(db);
+    moduleAimClawSlackExplicitMentions.up(db);
 
-    const policy = (id: string) =>
-      (
-        db
-          .prepare('SELECT ignored_message_policy FROM messaging_group_agents WHERE messaging_group_id = ?')
-          .get(id) as { ignored_message_policy: string }
-      ).ignored_message_policy;
-    expect(policy('mg-slack')).toBe('drop');
-    expect(policy('mg-discord')).toBe('accumulate');
+    const wiring = (id: string) =>
+      db
+        .prepare('SELECT engage_mode, ignored_message_policy FROM messaging_group_agents WHERE messaging_group_id = ?')
+        .get(id) as { engage_mode: string; ignored_message_policy: string };
+    expect(wiring('mg-slack')).toEqual({ engage_mode: 'mention', ignored_message_policy: 'drop' });
+    expect(wiring('mg-discord')).toEqual({ engage_mode: 'mention-sticky', ignored_message_policy: 'accumulate' });
   });
 });
 

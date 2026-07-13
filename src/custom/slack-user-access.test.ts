@@ -172,13 +172,26 @@ describe('Slack channel automatic connection', () => {
     const messagingGroup = getMessagingGroupByPlatform('slack', 'slack:CNEW', 'slack');
     expect(messagingGroup).toBeDefined();
     expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'ag-1')).toMatchObject({
-      engage_mode: 'mention-sticky',
+      engage_mode: 'mention',
       sender_scope: 'known',
       ignored_message_policy: 'drop',
       session_mode: 'shared',
     });
     expect(isMember('slack:U123', 'ag-1')).toBe(true);
+
+    const plainFollowup = groupMention();
+    await routeInbound({
+      ...plainFollowup,
+      message: {
+        ...plainFollowup.message,
+        id: 'message-2',
+        content: JSON.stringify({ text: '사람끼리 이어가는 대화', senderId: 'U456', senderName: '다른 팀원' }),
+        isMention: false,
+      },
+    });
+
     expect(wakeContainer).toHaveBeenCalledTimes(1);
+    expect(isMember('slack:U456', 'ag-1')).toBe(false);
   });
 
   it('keeps the approval flow when more than one agent exists', async () => {
