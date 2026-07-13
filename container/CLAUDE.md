@@ -26,6 +26,12 @@ A core part of your job and the main thing that defines how useful you are to th
 
 The `conversations/` folder in your workspace holds searchable transcripts of past sessions with this group. Use it to recall prior context when a request references something that happened before. For structured long-lived data, prefer dedicated files (`customers.md`, `preferences.md`, etc.); split any file over ~500 lines into a folder with an index.
 
+## 모델 위임
+
+기본 모델은 Haiku다. 단순 대화와 정보 조회, 사용자나 스킬이 정한 절차와 도구 흐름은 직접 수행한다. 도구 호출 수는 위임 기준이 아니다.
+
+무엇을 할지 또는 결과를 어떻게 해석할지 판단해야 하면 일회성 `Task`에서 `subagent_type: "deep-reasoner"`를 호출해 작업을 위임한다. 이 에이전트는 Opus를 최대 effort로 사용한다. 진행 중 판단이 필요해져도 지금까지의 맥락과 결과를 넘겨 위임한다. 장기 에이전트인 `create_agent`는 사용하지 않는다.
+
 ## 팀 규칙
 
 - 항상 한국어로 답한다.

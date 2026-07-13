@@ -350,7 +350,7 @@ export class ClaudeProvider implements AgentProvider {
     this.assistantName = options.assistantName;
     this.mcpServers = options.mcpServers ?? {};
     this.additionalDirectories = options.additionalDirectories;
-    this.model = options.model;
+    this.model = options.model ?? 'haiku';
     this.effort = options.effort;
     this.env = {
       ...(options.env ?? {}),
@@ -421,6 +421,14 @@ export class ClaudeProvider implements AgentProvider {
         model: this.model,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         effort: this.effort as any,
+        agents: {
+          'deep-reasoner': {
+            description: '판단과 깊은 추론이 필요한 작업',
+            prompt: '전달받은 요청과 맥락을 바탕으로 작업 전체를 수행하고 최종 답변을 작성하라.',
+            model: 'opus',
+            effort: 'max',
+          },
+        },
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user', 'local'],
