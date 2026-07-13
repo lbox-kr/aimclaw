@@ -52,6 +52,13 @@ Slack 앱이 받은 사람의 DM·멘션은 해당 에이전트의 일반 사용
 임의로 고르지 않고 기존 관리자 승인 카드를 사용한다. 명시적으로 거절한 채널은
 자동으로 다시 연결하지 않는다.
 
+### Slack 처리 상태
+
+Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. 최상위 DM 메시지도
+해당 메시지를 root로 하는 Assistant thread에서 답해 타이핑 상태를 표시하지만,
+에이전트의 DM 세션과 대화 문맥은 하나로 유지한다. 유효한 thread가 없는 경우에만
+`hourglass_flowing_sand` reaction을 사용하고 첫 응답 후 제거한다.
+
 ### 일반 사용자 화이트리스트
 
 `container/skills/team-user-access/allowlist.json`에서 관리한다.

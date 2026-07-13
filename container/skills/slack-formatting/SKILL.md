@@ -111,7 +111,7 @@ Slack은 긴 Markdown도 받을 수 있지만 AimClaw은 읽기 좋은 메시지
 
 ## Reaction, 수정, thread
 
-- 요청 접수용 `hourglass_flowing_sand` reaction은 호스트가 즉시 추가하고 첫 응답 후 제거한다. 같은 반응을 다시 붙이지 않는다.
+- 호스트는 Slack thread에서 네이티브 `Typing...` 상태를 우선 사용한다. thread 상태를 사용할 수 없을 때만 `hourglass_flowing_sand` reaction을 추가하고 첫 응답 후 제거한다. 같은 접수 반응을 다시 붙이지 않는다.
 - 사용자가 현재 thread의 앞선 내용을 가리키지만 입력에 그 내용이 없으면 `read_current_thread`로 맥락을 확인한 뒤 답한다. 요청만으로 충분하면 조회하지 않는다.
 - `eyes`: 요청을 확인했고 곧 작업할 때
 - `white_check_mark`: 별도 설명 없이 완료 여부만 알리면 될 때
