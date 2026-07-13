@@ -1,13 +1,44 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import fs from 'fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { InboundEvent } from '../channels/adapter.js';
+import type { ChannelDefaults, InboundEvent } from '../channels/adapter.js';
+import { registerChannelAdapter } from '../channels/channel-registry.js';
 import { closeDb, createAgentGroup, initTestDb, runMigrations } from '../db/index.js';
+import {
+  createMessagingGroup,
+  getMessagingGroupAgentByPair,
+  getMessagingGroupByPlatform,
+} from '../db/messaging-groups.js';
 import { isMember } from '../modules/permissions/db/agent-group-members.js';
+import {
+  createPendingChannelApproval,
+  getPendingChannelApproval,
+} from '../modules/permissions/db/pending-channel-approvals.js';
 import { createUser } from '../modules/permissions/db/users.js';
 import { grantRole, isGlobalAdmin, isOwner } from '../modules/permissions/db/user-roles.js';
 import { applyRequestPolicy, changeAdministrator, parseAdministratorCommand } from './slack-user-access.js';
 
+vi.mock('../container-runner.js', () => ({
+  wakeContainer: vi.fn().mockResolvedValue(undefined),
+  isContainerRunning: vi.fn().mockReturnValue(false),
+  getActiveContainerCount: vi.fn().mockReturnValue(0),
+  killContainer: vi.fn(),
+}));
+
+vi.mock('../config.js', async () => {
+  const actual = await vi.importActual('../config.js');
+  return { ...actual, DATA_DIR: '/tmp/aimclaw-test-slack-user-access' };
+});
+
+const TEST_DIR = '/tmp/aimclaw-test-slack-user-access';
 const now = () => new Date().toISOString();
+
+const slackDefaults: ChannelDefaults = {
+  dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'request_approval' },
+  group: { engageMode: 'mention-sticky', threads: true, unknownSenderPolicy: 'request_approval' },
+  mentions: 'platform',
+};
+registerChannelAdapter('slack', { factory: () => null, defaults: slackDefaults });
 
 function user(id: string): void {
   createUser({ id, kind: 'slack', display_name: null, created_at: now() });
@@ -27,13 +58,39 @@ function event(text: string): InboundEvent {
   };
 }
 
-beforeEach(() => {
+function groupMention(platformId = 'slack:CNEW'): InboundEvent {
+  return {
+    channelType: 'slack',
+    instance: 'slack',
+    platformId,
+    threadId: 'thread-1',
+    message: {
+      id: 'message-1',
+      kind: 'chat-sdk',
+      content: JSON.stringify({ text: '<@UBOT> 안녕하세요', senderId: 'U123', senderName: '팀원' }),
+      timestamp: now(),
+      isMention: true,
+      isGroup: true,
+    },
+  };
+}
+
+beforeEach(async () => {
+  if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+  fs.mkdirSync(TEST_DIR, { recursive: true });
   const db = initTestDb();
   runMigrations(db);
   createAgentGroup({ id: 'ag-1', name: 'Agent', folder: 'agent', agent_provider: null, created_at: now() });
+  await import('../modules/permissions/index.js');
+
+  const { wakeContainer } = await import('../container-runner.js');
+  vi.mocked(wakeContainer).mockClear();
 });
 
-afterEach(() => closeDb());
+afterEach(() => {
+  closeDb();
+  if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+});
 
 describe('request authorization', () => {
   it('resolves owner and global admin as administrators, everyone else as a member', () => {
@@ -102,5 +159,71 @@ describe('Slack administrator commands', () => {
   it('rejects changes from a general user', () => {
     user('slack:member');
     expect(changeAdministrator('slack:member', { action: 'add', targetUserId: 'slack:U222' }).ok).toBe(false);
+  });
+});
+
+describe('Slack channel automatic connection', () => {
+  it('connects the first mentioned group to the sole agent and routes the same message', async () => {
+    const { routeInbound } = await import('../router.js');
+    const { wakeContainer } = await import('../container-runner.js');
+
+    await routeInbound(groupMention());
+
+    const messagingGroup = getMessagingGroupByPlatform('slack', 'slack:CNEW', 'slack');
+    expect(messagingGroup).toBeDefined();
+    expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'ag-1')).toMatchObject({
+      engage_mode: 'mention-sticky',
+      sender_scope: 'known',
+      ignored_message_policy: 'accumulate',
+      session_mode: 'shared',
+    });
+    expect(isMember('slack:U123', 'ag-1')).toBe(true);
+    expect(wakeContainer).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the approval flow when more than one agent exists', async () => {
+    createAgentGroup({
+      id: 'ag-other',
+      name: '다른 에이전트',
+      folder: 'other',
+      agent_provider: null,
+      created_at: now(),
+    });
+    const { routeInbound } = await import('../router.js');
+
+    await routeInbound(groupMention('slack:CMULTI'));
+
+    const messagingGroup = getMessagingGroupByPlatform('slack', 'slack:CMULTI', 'slack');
+    expect(messagingGroup).toBeDefined();
+    expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'ag-1')).toBeUndefined();
+    expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'ag-other')).toBeUndefined();
+  });
+
+  it('clears an existing approval card when the channel is automatically connected', async () => {
+    createMessagingGroup({
+      id: 'mg-pending',
+      channel_type: 'slack',
+      platform_id: 'slack:CPENDING',
+      instance: 'slack',
+      name: null,
+      is_group: 1,
+      unknown_sender_policy: 'request_approval',
+      created_at: now(),
+    });
+    createPendingChannelApproval({
+      messaging_group_id: 'mg-pending',
+      agent_group_id: 'ag-1',
+      original_message: JSON.stringify(groupMention('slack:CPENDING')),
+      approver_user_id: 'slack:owner',
+      created_at: now(),
+      title: 'Connect to 에이미',
+      options_json: '[]',
+    });
+    const { routeInbound } = await import('../router.js');
+
+    await routeInbound(groupMention('slack:CPENDING'));
+
+    expect(getPendingChannelApproval('mg-pending')).toBeUndefined();
+    expect(getMessagingGroupAgentByPair('mg-pending', 'ag-1')).toBeDefined();
   });
 });
