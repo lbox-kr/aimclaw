@@ -19,6 +19,18 @@
 set -u
 PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
+# node/pnpm are nvm-managed here and are not on launchd's minimal PATH. Source
+# nvm so `pnpm` resolves; without this every code-mode deploy dies at build with
+# "pnpm: command not found" while the running service is left untouched. Guard
+# the source with set +u — nvm.sh references unset vars under `set -u`.
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  set +u
+  # shellcheck disable=SC1091
+  . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
+  set -u
+fi
+
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 REPO_ROOT="$PWD"
 DEPLOY_DIR="$HOME/nanoclaw-deploy"
