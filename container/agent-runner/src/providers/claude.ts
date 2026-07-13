@@ -8,7 +8,15 @@ import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/conn
 import { authorizeTool } from '../execution-policy.js';
 import { TIMEZONE, formatLocalStamp } from '../timezone.js';
 import { registerProvider } from './provider-registry.js';
-import type { AgentProvider, AgentQuery, McpServerConfig, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type {
+  AgentProvider,
+  AgentQuery,
+  McpServerConfig,
+  ProviderEvent,
+  ProviderOptions,
+  ProviderTaskUpdate,
+  QueryInput,
+} from './types.js';
 
 function log(msg: string): void {
   console.error(`[claude-provider] ${msg}`);
@@ -75,6 +83,264 @@ interface SDKUserMessage {
   message: { role: 'user'; content: string };
   parent_tool_use_id: null;
   session_id: string;
+}
+
+const DEEP_REASONER = 'deep-reasoner';
+const DEEP_REASONING_STATUS = '조금 더 깊이 고민하고 있어요';
+const DEEP_REASONING_COMPLETE_STATUS = '고민한 내용을 정리하고 있어요';
+
+interface DeepReasoningState {
+  toolUseIds: Set<string>;
+  taskToolUseIds: Map<string, string | undefined>;
+}
+
+interface ClaudeTaskState {
+  tasks: Map<string, string>;
+  taskAliases: Map<string, string>;
+}
+
+const LONG_TOOL_SECONDS = 4;
+
+function taskDescriptor(
+  toolName: string,
+  input: unknown,
+  includeSlowFallback = false,
+): { title: string; immediate: boolean } | null {
+  const name = toolName.toLowerCase();
+  const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+
+  if (name === 'task' || name === 'agent') {
+    const subtype = String(args.subagent_type ?? args.agent_type ?? '');
+    return {
+      title: subtype === DEEP_REASONER ? '조금 더 깊이 검토하기' : '작업 나누어 확인하기',
+      immediate: true,
+    };
+  }
+  if (name === 'websearch') return { title: '관련 자료 찾기', immediate: true };
+  if (name === 'webfetch') return { title: '자료 내용 확인하기', immediate: true };
+  if (name.startsWith('mcp__')) {
+    if (name.includes('set_status') || name.includes('send_message') || name.includes('send_file')) return null;
+    if (name.includes('install') || name.includes('package')) return { title: '환경 준비하기', immediate: true };
+    if (name.includes('jira') || name.includes('atlassian')) return { title: 'Jira 확인하기', immediate: true };
+    if (!name.startsWith('mcp__nanoclaw__')) return { title: '외부 서비스 확인하기', immediate: true };
+  }
+  if (name === 'bash') {
+    const command = String(args.command ?? '').toLowerCase();
+    if (/\b(test|vitest|jest|pytest)\b|bun test|pnpm test|npm test/.test(command)) {
+      return { title: '검증 실행하기', immediate: true };
+    }
+    if (/\b(build|compile|typecheck|tsc)\b/.test(command)) return { title: '빌드 확인하기', immediate: true };
+    if (/\b(install|add)\b/.test(command) && /\b(pnpm|npm|bun|apt|brew)\b/.test(command)) {
+      return { title: '환경 준비하기', immediate: true };
+    }
+    if (includeSlowFallback) return { title: '작업 실행하기', immediate: false };
+    return null;
+  }
+  if (!includeSlowFallback) return null;
+  if (name === 'read' || name === 'grep' || name === 'glob') return { title: '자료 살펴보기', immediate: false };
+  if (name === 'taskoutput') return { title: '작업 결과 기다리기', immediate: false };
+  return { title: '작업 처리하기', immediate: false };
+}
+
+function startTask(state: ClaudeTaskState, id: string, title: string): ProviderTaskUpdate[] {
+  if (!id || state.tasks.has(id)) return [];
+  const safeId = id.slice(0, 100);
+  const safeTitle = title.slice(0, 80);
+  state.tasks.set(safeId, safeTitle);
+  return [{ id: safeId, title: safeTitle, status: 'in_progress' }];
+}
+
+function finishTask(state: ClaudeTaskState, id: string, failed: boolean): ProviderTaskUpdate[] {
+  const resolvedId = state.taskAliases.get(id) ?? id.slice(0, 100);
+  const title = state.tasks.get(resolvedId);
+  if (!title) return [];
+  state.tasks.delete(resolvedId);
+  for (const [taskId, alias] of state.taskAliases) {
+    if (alias === resolvedId) state.taskAliases.delete(taskId);
+  }
+  return [{ id: resolvedId, title, status: failed ? 'error' : 'complete' }];
+}
+
+/** Convert only meaningful lifecycle metadata; never expose tool input or model output. */
+export function getClaudeTaskUpdates(message: unknown, state: ClaudeTaskState): ProviderTaskUpdate[] {
+  if (!message || typeof message !== 'object') return [];
+  const sdkMessage = message as {
+    type?: string;
+    subtype?: string;
+    task_id?: string;
+    tool_use_id?: string;
+    subagent_type?: string;
+    parent_tool_use_id?: string | null;
+    tool_name?: string;
+    elapsed_time_seconds?: number;
+    patch?: { status?: string };
+    status?: string;
+    is_error?: boolean;
+    message?: { content?: unknown };
+  };
+
+  if (sdkMessage.type === 'result') {
+    const updates = [...state.tasks].map(([id, title]): ProviderTaskUpdate => ({
+      id,
+      title,
+      status: sdkMessage.is_error === true ? 'error' : 'complete',
+    }));
+    state.tasks.clear();
+    state.taskAliases.clear();
+    return updates;
+  }
+
+  if (sdkMessage.type === 'assistant') {
+    const content = sdkMessage.message?.content;
+    if (!Array.isArray(content)) return [];
+    return content.flatMap((block) => {
+      if (!block || typeof block !== 'object') return [];
+      const tool = block as { type?: string; id?: string; name?: string; input?: unknown };
+      if (tool.type !== 'tool_use' || !tool.id || !tool.name) return [];
+      const descriptor = taskDescriptor(tool.name, tool.input);
+      return descriptor?.immediate ? startTask(state, tool.id, descriptor.title) : [];
+    });
+  }
+
+  if (sdkMessage.type === 'tool_progress') {
+    if (
+      !sdkMessage.tool_use_id ||
+      !sdkMessage.tool_name ||
+      sdkMessage.parent_tool_use_id ||
+      (sdkMessage.elapsed_time_seconds ?? 0) < LONG_TOOL_SECONDS
+    ) {
+      return [];
+    }
+    const descriptor = taskDescriptor(sdkMessage.tool_name, undefined, true);
+    return descriptor ? startTask(state, sdkMessage.tool_use_id, descriptor.title) : [];
+  }
+
+  if (sdkMessage.type === 'user') {
+    const content = sdkMessage.message?.content;
+    const updates: ProviderTaskUpdate[] = [];
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        const result = block as { type?: string; tool_use_id?: string; is_error?: boolean };
+        if (result.type === 'tool_result' && result.tool_use_id) {
+          updates.push(...finishTask(state, result.tool_use_id, result.is_error === true));
+        }
+      }
+    }
+    if (updates.length === 0 && sdkMessage.parent_tool_use_id) {
+      updates.push(...finishTask(state, sdkMessage.parent_tool_use_id, false));
+    }
+    return updates;
+  }
+
+  if (sdkMessage.type !== 'system' || !sdkMessage.task_id) return [];
+  if (sdkMessage.subtype === 'task_started') {
+    const displayId = (sdkMessage.tool_use_id ?? sdkMessage.task_id).slice(0, 100);
+    state.taskAliases.set(sdkMessage.task_id, displayId);
+    const title = sdkMessage.subagent_type === DEEP_REASONER ? '조금 더 깊이 검토하기' : '작업 나누어 확인하기';
+    return startTask(state, displayId, title);
+  }
+  if (sdkMessage.subtype === 'task_progress') {
+    const displayId = state.taskAliases.get(sdkMessage.task_id) ?? (sdkMessage.tool_use_id ?? sdkMessage.task_id);
+    state.taskAliases.set(sdkMessage.task_id, displayId.slice(0, 100));
+    const title = sdkMessage.subagent_type === DEEP_REASONER ? '조금 더 깊이 검토하기' : '작업 나누어 확인하기';
+    return startTask(state, displayId, title);
+  }
+  if (sdkMessage.subtype === 'task_notification') {
+    return finishTask(state, sdkMessage.task_id, sdkMessage.status === 'failed' || sdkMessage.status === 'stopped');
+  }
+  if (sdkMessage.subtype === 'task_updated' && sdkMessage.patch?.status) {
+    const terminal = ['completed', 'failed', 'killed'].includes(sdkMessage.patch.status);
+    return terminal
+      ? finishTask(state, sdkMessage.task_id, sdkMessage.patch.status === 'failed' || sdkMessage.patch.status === 'killed')
+      : [];
+  }
+  return [];
+}
+
+function finishDeepReasoningTool(state: DeepReasoningState, toolUseId: string): boolean {
+  const wasActive = state.toolUseIds.delete(toolUseId);
+  for (const [taskId, linkedToolUseId] of state.taskToolUseIds) {
+    if (linkedToolUseId === toolUseId) state.taskToolUseIds.delete(taskId);
+  }
+  return wasActive;
+}
+
+function finishDeepReasoningTask(state: DeepReasoningState, taskId: string): boolean {
+  if (!state.taskToolUseIds.has(taskId)) return false;
+  const toolUseId = state.taskToolUseIds.get(taskId);
+  state.taskToolUseIds.delete(taskId);
+  if (toolUseId) state.toolUseIds.delete(toolUseId);
+  return true;
+}
+
+/** Translate only safe lifecycle metadata; never expose the delegated prompt or reasoning. */
+export function getClaudeWorkingStatus(message: unknown, state: DeepReasoningState): string | null {
+  if (!message || typeof message !== 'object') return null;
+  const sdkMessage = message as {
+    type?: string;
+    subtype?: string;
+    task_id?: string;
+    tool_use_id?: string;
+    subagent_type?: string;
+    parent_tool_use_id?: string | null;
+    patch?: { status?: string };
+    message?: { content?: unknown };
+  };
+
+  if (sdkMessage.type === 'assistant') {
+    if (sdkMessage.subagent_type === DEEP_REASONER) return DEEP_REASONING_STATUS;
+    const content = sdkMessage.message?.content;
+    if (!Array.isArray(content)) return null;
+    let started = false;
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      const tool = block as { type?: string; id?: string; name?: string; input?: unknown };
+      const input = tool.input as { subagent_type?: string; agent_type?: string } | undefined;
+      if (
+        tool.type === 'tool_use' &&
+        (tool.name === 'Task' || tool.name === 'Agent') &&
+        (input?.subagent_type === DEEP_REASONER || input?.agent_type === DEEP_REASONER) &&
+        tool.id
+      ) {
+        state.toolUseIds.add(tool.id);
+        started = true;
+      }
+    }
+    return started ? DEEP_REASONING_STATUS : null;
+  }
+
+  if (sdkMessage.type === 'user' && sdkMessage.parent_tool_use_id) {
+    return finishDeepReasoningTool(state, sdkMessage.parent_tool_use_id)
+      ? DEEP_REASONING_COMPLETE_STATUS
+      : null;
+  }
+
+  if (sdkMessage.type !== 'system') return null;
+  if (sdkMessage.subtype === 'task_started' && sdkMessage.task_id && sdkMessage.subagent_type === DEEP_REASONER) {
+    state.taskToolUseIds.set(sdkMessage.task_id, sdkMessage.tool_use_id);
+    if (sdkMessage.tool_use_id) state.toolUseIds.add(sdkMessage.tool_use_id);
+    return DEEP_REASONING_STATUS;
+  }
+  if (
+    sdkMessage.subtype === 'task_progress' &&
+    sdkMessage.task_id &&
+    (sdkMessage.subagent_type === DEEP_REASONER || state.taskToolUseIds.has(sdkMessage.task_id))
+  ) {
+    return DEEP_REASONING_STATUS;
+  }
+  if (sdkMessage.subtype === 'task_notification' && sdkMessage.task_id) {
+    return finishDeepReasoningTask(state, sdkMessage.task_id) ? DEEP_REASONING_COMPLETE_STATUS : null;
+  }
+  if (
+    sdkMessage.subtype === 'task_updated' &&
+    sdkMessage.task_id &&
+    sdkMessage.patch?.status &&
+    ['completed', 'failed', 'killed'].includes(sdkMessage.patch.status)
+  ) {
+    return finishDeepReasoningTask(state, sdkMessage.task_id) ? DEEP_REASONING_COMPLETE_STATUS : null;
+  }
+  return null;
 }
 
 /**
@@ -446,12 +712,30 @@ export class ClaudeProvider implements AgentProvider {
 
     async function* translateEvents(): AsyncGenerator<ProviderEvent> {
       let messageCount = 0;
+      let lastWorkingStatus: string | null = null;
+      const deepReasoningState: DeepReasoningState = {
+        toolUseIds: new Set(),
+        taskToolUseIds: new Map(),
+      };
+      const taskState: ClaudeTaskState = {
+        tasks: new Map(),
+        taskAliases: new Map(),
+      };
       for await (const message of sdkResult) {
         if (aborted) return;
         messageCount++;
 
         // Yield activity for every SDK event so the poll loop knows the agent is working
         yield { type: 'activity' };
+
+        const workingStatus = getClaudeWorkingStatus(message, deepReasoningState);
+        if (workingStatus && workingStatus !== lastWorkingStatus) {
+          lastWorkingStatus = workingStatus;
+          yield { type: 'status', message: workingStatus };
+        }
+        for (const task of getClaudeTaskUpdates(message, taskState)) {
+          yield { type: 'task_update', task };
+        }
 
         if (message.type === 'system' && message.subtype === 'init') {
           yield { type: 'init', continuation: message.session_id };

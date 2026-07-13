@@ -24,11 +24,39 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { getRegisteredChannelNames } from './channel-registry.js';
+import { getChannelDefaults, getRegisteredChannelNames } from './channel-registry.js';
 import './index.js'; // the real barrel — triggers every channel's self-registration
+import { anchorSlackRootDm, extractSlackStreamContext } from './slack.js';
 
 describe('slack channel registration', () => {
   it('registers slack via the channel barrel', () => {
     expect(getRegisteredChannelNames()).toContain('slack');
+  });
+
+  it('keeps DM requests in threads for native assistant status and isolation', () => {
+    expect(getChannelDefaults('slack').dm.threads).toBe(true);
+  });
+
+  it('anchors a top-level DM to the user message for native agent status', () => {
+    const message = {
+      id: '1783934548.123400',
+      kind: 'chat-sdk' as const,
+      content: {},
+      timestamp: '2026-07-13T09:22:28.000Z',
+      isGroup: false,
+    };
+
+    expect(anchorSlackRootDm('slack:D123', message)).toBe('slack:D123:1783934548.123400');
+    expect(anchorSlackRootDm('slack:D123:1783934000.000100', message)).toBe('slack:D123:1783934000.000100');
+    expect(anchorSlackRootDm('slack:C123', { ...message, isGroup: true })).toBe('slack:C123');
+  });
+
+  it('keeps only non-secret stream addressing metadata from the raw Slack event', () => {
+    expect(
+      extractSlackStreamContext({
+        author: { userId: 'U123' },
+        raw: { team_id: 'T123', token: 'must-not-be-projected', text: 'private message' },
+      } as never),
+    ).toEqual({ recipientUserId: 'U123', recipientTeamId: 'T123' });
   });
 });

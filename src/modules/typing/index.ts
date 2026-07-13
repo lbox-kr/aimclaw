@@ -43,9 +43,16 @@ const HEARTBEAT_FRESH_MS = 6000;
  * stays running; ticks inside the pause just skip the setTyping call.
  */
 const POST_DELIVERY_PAUSE_MS = 10000;
+const DEFAULT_WORKING_STATUS = '요청을 처리하고 있어요';
 
 interface TypingAdapter {
-  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
+  setTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    status?: string,
+  ): Promise<void>;
 }
 
 interface TypingTarget {
@@ -55,6 +62,7 @@ interface TypingTarget {
   threadId: string | null;
   /** Adapter instance that owns the chat; undefined = default (= channelType). */
   instance?: string;
+  status: string;
   interval: NodeJS.Timeout;
   startedAt: number;
   pausedUntil: number; // epoch ms; 0 = not paused
@@ -79,9 +87,10 @@ async function triggerTyping(
   platformId: string,
   threadId: string | null,
   instance?: string,
+  status?: string,
 ): Promise<void> {
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, instance);
+    await adapter?.setTyping?.(channelType, platformId, threadId, instance, status);
   } catch {
     // Typing is best-effort — don't let it fail delivery or routing.
   }
@@ -104,6 +113,7 @@ export function startTypingRefresh(
   platformId: string,
   threadId: string | null,
   instance?: string,
+  status = DEFAULT_WORKING_STATUS,
 ): void {
   const existing = typingRefreshers.get(sessionId);
   if (existing) {
@@ -112,7 +122,7 @@ export function startTypingRefresh(
     // the container-wake latency budget. Also clear any lingering
     // post-delivery pause: a new inbound means the user expects
     // typing to show immediately.
-    triggerTyping(channelType, platformId, threadId, instance).catch(() => {});
+    triggerTyping(channelType, platformId, threadId, instance, status).catch(() => {});
     existing.startedAt = Date.now();
     existing.pausedUntil = 0;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
@@ -125,11 +135,12 @@ export function startTypingRefresh(
     existing.platformId = platformId;
     existing.threadId = threadId;
     existing.instance = instance;
+    existing.status = status;
     return;
   }
 
   // Immediate tick + periodic refresh.
-  triggerTyping(channelType, platformId, threadId, instance).catch(() => {});
+  triggerTyping(channelType, platformId, threadId, instance, status).catch(() => {});
   const startedAt = Date.now();
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
@@ -142,7 +153,7 @@ export function startTypingRefresh(
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
-      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance).catch(() => {});
+      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.status).catch(() => {});
       return;
     }
 
@@ -158,10 +169,22 @@ export function startTypingRefresh(
     platformId,
     threadId,
     instance,
+    status,
     interval,
     startedAt,
     pausedUntil: 0,
   });
+}
+
+/** Replace the native working text for an active request and display it
+ * immediately. The periodic refresher keeps the same text alive while the
+ * container heartbeat remains fresh. */
+export function updateTypingStatus(sessionId: string, status: string): void {
+  const entry = typingRefreshers.get(sessionId);
+  if (!entry) return;
+  entry.status = status;
+  entry.pausedUntil = 0;
+  triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, status).catch(() => {});
 }
 
 /**

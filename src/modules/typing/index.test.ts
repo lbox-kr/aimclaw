@@ -14,15 +14,15 @@ vi.mock('../../config.js', async () => {
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-typing' };
 });
 
-import { setTypingAdapter, startTypingRefresh, stopTypingRefresh } from './index.js';
+import { setTypingAdapter, startTypingRefresh, stopTypingRefresh, updateTypingStatus } from './index.js';
 
-type Call = { channelType: string; platformId: string; threadId: string | null; instance?: string };
+type Call = { channelType: string; platformId: string; threadId: string | null; instance?: string; status?: string };
 
 function captureAdapter() {
   const calls: Call[] = [];
   setTypingAdapter({
-    async setTyping(channelType, platformId, threadId, instance) {
-      calls.push({ channelType, platformId, threadId, instance });
+    async setTyping(channelType, platformId, threadId, instance, status) {
+      calls.push({ channelType, platformId, threadId, instance, status });
     },
   });
   return calls;
@@ -48,6 +48,7 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'slack:C1',
       threadId: null,
       instance: 'slack-tester',
+      status: '요청을 처리하고 있어요',
     });
   });
 
@@ -104,6 +105,7 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'tg:99',
       threadId: null,
       instance: 'telegram',
+      status: '요청을 처리하고 있어요',
     });
 
     // Interval ticks fire from the stored entry — all four fields must
@@ -117,7 +119,25 @@ describe('startTypingRefresh — instance forwarding', () => {
         platformId: 'tg:99',
         threadId: null,
         instance: 'telegram',
+        status: '요청을 처리하고 있어요',
       });
     }
+  });
+
+  it('updates the native status immediately and keeps it for later refresh ticks', async () => {
+    const calls = captureAdapter();
+    startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', 'T1', 'slack');
+    await vi.advanceTimersByTimeAsync(0);
+    calls.length = 0;
+
+    updateTypingStatus('sess-1', 'Jira에서 할 일을 조회하는 중이에요');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].status).toBe('Jira에서 할 일을 조회하는 중이에요');
+
+    calls.length = 0;
+    await vi.advanceTimersByTimeAsync(4_500);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls[calls.length - 1].status).toBe('Jira에서 할 일을 조회하는 중이에요');
   });
 });

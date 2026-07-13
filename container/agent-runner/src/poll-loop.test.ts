@@ -438,6 +438,82 @@ describe('error result with no <message> envelope', () => {
   });
 });
 
+describe('Slack native stream events', () => {
+  it('orders task update, marked final answer, and stream end', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-main', 'Slack', 'channel', 'slack', 'slack:C1', NULL)`,
+      )
+      .run();
+    insertMessage('m1', 'chat-sdk', { sender: 'User', text: '검토해줘' });
+
+    async function* events(): AsyncGenerator<ProviderEvent> {
+      yield {
+        type: 'task_update',
+        task: { id: 'task-1', title: '검증 실행하기', status: 'in_progress' },
+      };
+      yield { type: 'result', text: '<message to="slack-main">검토가 끝났어요.</message>' };
+    }
+    const query: AgentQuery = { push: () => {}, end: () => {}, abort: () => {}, events: events() };
+    await processQuery(
+      query,
+      {
+        platformId: 'slack:C1',
+        channelType: 'slack',
+        threadId: 'slack:C1:1.000001',
+        inReplyTo: 'm1',
+        taskFire: false,
+      },
+      ['m1'],
+      'claude',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    const out = getUndeliveredMessages();
+    expect(out.map((row) => JSON.parse(row.content).action ?? 'chat')).toEqual([
+      'stream_task_update',
+      'chat',
+      'stream_end',
+    ]);
+    expect(JSON.parse(out[1].content)).toEqual({ text: '검토가 끝났어요.', _nanoclawFinal: true });
+  });
+
+  it('closes an active task timeline when the provider iterator ends without a result', async () => {
+    async function* events(): AsyncGenerator<ProviderEvent> {
+      yield {
+        type: 'task_update',
+        task: { id: 'task-1', title: '외부 자료 확인하기', status: 'in_progress' },
+      };
+    }
+    const query: AgentQuery = { push: () => {}, end: () => {}, abort: () => {}, events: events() };
+
+    await processQuery(
+      query,
+      {
+        platformId: 'slack:C1',
+        channelType: 'slack',
+        threadId: 'slack:C1:1.000001',
+        inReplyTo: 'm1',
+        taskFire: false,
+      },
+      ['m1'],
+      'claude',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    const out = getUndeliveredMessages();
+    expect(out.map((row) => JSON.parse(row.content).action)).toEqual([
+      'stream_task_update',
+      'stream_end',
+    ]);
+  });
+});
+
 describe('isCorruptionError', () => {
   it('matches the Docker Desktop macOS torn-read symptom', () => {
     expect(isCorruptionError('database disk image is malformed')).toBe(true);

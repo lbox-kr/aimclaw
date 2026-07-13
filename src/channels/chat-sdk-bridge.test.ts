@@ -96,6 +96,47 @@ describe('createChatSdkBridge', () => {
     expect(typeof bridge.subscribe).toBe('function');
   });
 
+  it('forwards native working status text to the underlying adapter', async () => {
+    const startTyping = vi.fn(async () => {});
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ startTyping }),
+      supportsThreads: true,
+    });
+
+    await bridge.setTyping!('slack:C1', 'slack:C1:1712345678.000100', 'Jira 조회 중이에요');
+
+    expect(startTyping).toHaveBeenCalledWith('slack:C1:1712345678.000100', 'Jira 조회 중이에요');
+  });
+
+  it('delegates one structured native stream to the underlying adapter', async () => {
+    const seen: unknown[] = [];
+    const stream = vi.fn(async (threadId: string, chunks: AsyncIterable<unknown>, options?: unknown) => {
+      for await (const chunk of chunks) seen.push(chunk);
+      return { id: 'stream-1', threadId, raw: { options } };
+    });
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ stream } as unknown as Partial<Adapter>),
+      supportsThreads: true,
+    });
+    async function* chunks() {
+      yield { type: 'task_update' as const, id: 't1', title: '검증 실행하기', status: 'in_progress' as const };
+      yield { type: 'markdown_text' as const, text: '완료했어요.' };
+    }
+
+    await expect(
+      bridge.stream!('slack:C1', 'slack:C1:1.000001', chunks(), {
+        recipientUserId: 'U1',
+        recipientTeamId: 'T1',
+        taskDisplayMode: 'timeline',
+      }),
+    ).resolves.toBe('stream-1');
+    expect(seen).toEqual([
+      { type: 'task_update', id: 't1', title: '검증 실행하기', status: 'in_progress' },
+      { type: 'markdown_text', text: '완료했어요.' },
+    ]);
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
   it('reads recent thread messages through the underlying adapter', async () => {
     const fetchMessages = vi.fn(async () => ({
       messages: [

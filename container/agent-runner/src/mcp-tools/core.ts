@@ -1,5 +1,6 @@
 /**
- * Core MCP tools: send_message, send_file, edit_message, add_reaction.
+ * Core MCP tools: send_message, send_file, edit_message, add_reaction,
+ * set_status.
  *
  * All outbound tools resolve destinations via the local destination map
  * (see destinations.ts). Agents reference destinations by name; the map
@@ -128,6 +129,39 @@ export const sendMessage: McpToolDefinition = {
 
     log(`send_message: #${seq} → ${routing.resolvedName}`);
     return ok(`Message sent to ${routing.resolvedName} (id: ${seq})`);
+  },
+};
+
+export const setStatus: McpToolDefinition = {
+  tool: {
+    name: 'set_status',
+    description:
+      'Update the current conversation native working status without posting a message. Use before a slow operation and at meaningful phase changes.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: {
+          type: 'string',
+          description: 'Short user-facing present-progress text, e.g. "Jira에서 할 일을 조회하는 중이에요"',
+        },
+      },
+      required: ['status'],
+    },
+  },
+  async handler(args) {
+    const status = typeof args.status === 'string' ? args.status.trim().slice(0, 100) : '';
+    if (!status) return err('status is required');
+
+    const id = generateId();
+    writeMessageOut({
+      id,
+      in_reply_to: getCurrentInReplyTo(),
+      kind: 'system',
+      content: JSON.stringify({ action: 'set_status', status }),
+    });
+
+    log(`set_status: ${status}`);
+    return ok('Working status updated');
   },
 };
 
@@ -260,4 +294,4 @@ export const addReaction: McpToolDefinition = {
   },
 };
 
-registerTools([sendMessage, sendFile, editMessage, addReaction]);
+registerTools([sendMessage, sendFile, editMessage, addReaction, setStatus]);

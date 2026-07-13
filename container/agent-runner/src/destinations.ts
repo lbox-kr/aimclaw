@@ -122,7 +122,7 @@ function buildDestinationsSection(): string {
   );
   lines.push('');
   lines.push(
-    'The `send_message` MCP tool is the same delivery, available mid-turn — handy for a quick acknowledgment ("on it") before a slow tool call. Each `send_message` call and each final-response `<message>` block lands as its own message in the conversation, so they read as a sequence rather than as one combined reply.',
+    "The `set_status` MCP tool updates the current conversation's native working indicator without posting a message; prefer it before a slow operation. Use `send_message` mid-turn only for a meaningful partial result. Each `send_message` call and each final-response `<message>` block lands as its own message in the conversation, so they read as a sequence rather than as one combined reply.",
   );
   return lines.join('\n');
 }

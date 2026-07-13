@@ -21,6 +21,8 @@ import {
   type Adapter,
   type ConcurrencyStrategy,
   type Message as ChatMessage,
+  type StreamChunk,
+  type StreamOptions,
 } from 'chat';
 import { log } from '../log.js';
 import { collectSlackInlineMentions } from '../custom/slack-mentions.js';
@@ -28,7 +30,14 @@ import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
-import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage, ThreadHistoryMessage } from './adapter.js';
+import type {
+  ChannelAdapter,
+  ChannelDefaults,
+  ChannelSetup,
+  InboundMessage,
+  NativeStreamContext,
+  ThreadHistoryMessage,
+} from './adapter.js';
 
 /** Adapter with optional gateway support (e.g., Discord). */
 interface GatewayAdapter extends Adapter {
@@ -66,6 +75,9 @@ export interface ChatSdkBridgeConfig {
   botToken?: string;
   /** Platform-specific reply context extraction. */
   extractReplyContext?: ReplyContextExtractor;
+  /** Project only the small, non-secret addressing fields required by a
+   * platform's native streaming API before the large raw payload is dropped. */
+  extractStreamContext?: (message: ChatMessage) => NativeStreamContext | undefined;
   /**
    * Whether this platform uses threads as the primary conversation unit.
    * See `ChannelAdapter.supportsThreads`. Declared by the calling channel
@@ -214,6 +226,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
     const inlineMentions = await collectSlackInlineMentions(adapter, message);
     if (inlineMentions.length > 0) serialized.inlineMentions = inlineMentions;
+
+    const streamContext = config.extractStreamContext?.(message);
+    if (streamContext && (streamContext.recipientUserId || streamContext.recipientTeamId)) {
+      serialized._nanoclawStreamContext = streamContext;
+    }
 
     // Drop raw to save DB space (can be very large)
     serialized.raw = undefined;
@@ -576,9 +593,9 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       }
     },
 
-    async setTyping(platformId: string, threadId: string | null) {
+    async setTyping(platformId: string, threadId: string | null, status?: string) {
       const tid = threadId ?? platformId;
-      await adapter.startTyping(tid);
+      await adapter.startTyping(tid, status);
     },
 
     async fetchThreadMessages(threadId: string, limit: number): Promise<ThreadHistoryMessage[]> {
@@ -626,6 +643,18 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     bridge.openDM = async (userHandle: string): Promise<string> => {
       const threadId = await adapter.openDM!(userHandle);
       return adapter.channelIdFromThreadId(threadId);
+    };
+  }
+
+  if (adapter.stream) {
+    bridge.stream = async (platformId, threadId, chunks, options): Promise<string | undefined> => {
+      const tid = threadId ?? platformId;
+      const result = await adapter.stream!(
+        tid,
+        chunks as AsyncIterable<StreamChunk>,
+        options as StreamOptions | undefined,
+      );
+      return result?.id;
     };
   }
 
