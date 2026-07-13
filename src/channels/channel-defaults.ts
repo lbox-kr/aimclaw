@@ -15,6 +15,7 @@
  */
 import type { ChannelDefaults } from './adapter.js';
 import { getChannelDefaults, hasDeclaredChannelDefaults } from './channel-registry.js';
+import { withAimClawSlackEngagement } from '../custom/slack-engagement.js';
 import { log } from '../log.js';
 import type { MessagingGroup } from '../types.js';
 
@@ -56,7 +57,7 @@ export function resolveWiringDefaults(
   agentGroupName: string,
   channelType?: string,
 ): { engage_mode: 'pattern' | 'mention' | 'mention-sticky'; engage_pattern: string | null } {
-  const decl = getChannelDefaults(channelKey, channelType);
+  const decl = withAimClawSlackEngagement(channelKey, channelType, getChannelDefaults(channelKey, channelType));
   const ctx = isGroup ? decl.group : decl.dm;
 
   let mode = ctx.engageMode;

@@ -307,7 +307,7 @@ describe('unknown-channel registration flow', () => {
     expect(mga.engage_pattern).toBe('.');
   });
 
-  it('approved Slack channels fetch history on demand instead of accumulating ignored traffic', async () => {
+  it('approved Slack channels require mentions and fetch history on demand', async () => {
     const { routeInbound } = await import('../../router.js');
     await routeInbound(slackGroupMention('slack:CAPPROVE'));
     await new Promise((r) => setTimeout(r, 10));
@@ -315,9 +315,10 @@ describe('unknown-channel registration flow', () => {
     const mgId = await approvePending();
     const { getDb } = await import('../../db/connection.js');
     const wiring = getDb()
-      .prepare('SELECT ignored_message_policy FROM messaging_group_agents WHERE messaging_group_id = ?')
-      .get(mgId) as { ignored_message_policy: string };
+      .prepare('SELECT engage_mode, ignored_message_policy FROM messaging_group_agents WHERE messaging_group_id = ?')
+      .get(mgId) as { engage_mode: string; ignored_message_policy: string };
 
+    expect(wiring.engage_mode).toBe('mention');
     expect(wiring.ignored_message_policy).toBe('drop');
   });
 

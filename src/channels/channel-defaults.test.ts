@@ -237,6 +237,28 @@ describe('resolveWiringDefaults', () => {
     });
   });
 
+  it('requires explicit mentions for AimClaw Slack groups even when the adapter declares sticky', async () => {
+    const reg = await import('./channel-registry.js');
+    reg.registerChannelAdapter('aimclaw-slack', {
+      factory: () => null,
+      defaults: {
+        dm: { engageMode: 'pattern', engagePattern: '.', threads: true, unknownSenderPolicy: 'public' },
+        group: { engageMode: 'mention-sticky', threads: true, unknownSenderPolicy: 'strict' },
+        mentions: 'platform',
+      },
+    });
+    const { resolveWiringDefaults } = await import('./channel-defaults.js');
+
+    expect(resolveWiringDefaults('aimclaw-slack', true, '에이미', 'slack')).toEqual({
+      engage_mode: 'mention',
+      engage_pattern: null,
+    });
+    expect(resolveWiringDefaults('aimclaw-slack', false, '에이미', 'slack')).toEqual({
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+    });
+  });
+
   it('throws on a pattern-mode declaration without a pattern', async () => {
     const { resolveWiringDefaults } = await withDeclaration({
       dm: { engageMode: 'pattern', threads: false, unknownSenderPolicy: 'public' },
