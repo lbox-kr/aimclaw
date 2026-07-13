@@ -21,6 +21,15 @@ function seedDestination(name: string, displayName: string, channelType: string,
 }
 
 describe('buildSystemPromptAddendum — multi-destination routing guidance', () => {
+  it('places the tracked contract directly in the system prompt with a neutral agent name', () => {
+    const prompt = buildSystemPromptAddendum('에이미', '# 에이미\n\n기본 높임법은 친근한 해요체다.');
+
+    expect(prompt).toContain('# 에이미');
+    expect(prompt).toContain('기본 높임법은 친근한 해요체다.');
+    expect(prompt).toContain('에이전트 이름은 **에이미**다.');
+    expect(prompt).not.toContain('# You are');
+  });
+
   it('includes default-routing nudge when there are >1 destinations', () => {
     seedDestination('casa', 'Casa', 'whatsapp', 'group-1@g.us');
     seedDestination('whatsapp-mg-17780', 'whatsapp-mg-17780', 'whatsapp', 'phone-2@s.whatsapp.net');

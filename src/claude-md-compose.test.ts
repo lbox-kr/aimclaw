@@ -56,7 +56,7 @@ afterEach(() => {
 });
 
 describe('composeGroupClaudeMd persona prepend', () => {
-  it('imports the persona fragment FIRST, before the shared base', () => {
+  it('imports the persona fragment first without duplicating the shared contract', () => {
     const ag = group('ag-persona', 'persona-group');
     seed(ag);
     writePersona(ag.folder, 'You are an SDR agent.\n');
@@ -65,7 +65,7 @@ describe('composeGroupClaudeMd persona prepend', () => {
 
     const imports = importsOf(ag.folder);
     expect(imports[0]).toBe('@./.claude-fragments/persona.md');
-    expect(imports[1]).toBe('@./.claude-shared.md');
+    expect(imports).not.toContain('@./.claude-shared.md');
     expect(fs.readFileSync(path.join(GROUPS_DIR, ag.folder, '.claude-fragments', 'persona.md'), 'utf-8')).toBe(
       'You are an SDR agent.',
     );
@@ -83,16 +83,20 @@ describe('composeGroupClaudeMd persona prepend', () => {
     expect(importsOf(ag.folder)[0]).toBe('@./.claude-fragments/persona.md');
   });
 
-  it('is inert when no persona file is present (non-template groups)', () => {
+  it('is inert when no persona file is present and removes the retired shared symlink', () => {
     const ag = group('ag-no-persona', 'no-persona-group');
     seed(ag);
+    const groupDir = path.join(GROUPS_DIR, ag.folder);
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.symlinkSync('/app/CLAUDE.md', path.join(groupDir, '.claude-shared.md'));
 
     composeGroupClaudeMd(ag);
 
     const imports = importsOf(ag.folder);
-    expect(imports[0]).toBe('@./.claude-shared.md');
+    expect(imports).not.toContain('@./.claude-shared.md');
     expect(imports).not.toContain('@./.claude-fragments/persona.md');
     expect(fs.existsSync(path.join(GROUPS_DIR, ag.folder, '.claude-fragments', 'persona.md'))).toBe(false);
+    expect(() => fs.lstatSync(path.join(groupDir, '.claude-shared.md'))).toThrow();
   });
 });
 

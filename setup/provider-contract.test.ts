@@ -77,7 +77,18 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(identity).not.toContain('개인 봇');
     expect(identity).not.toContain('전용 에이전트');
     expect(identity).not.toContain('팀 공용 봇');
-    expect(identity).toContain('정체성 질문에는 이름과 AIM 소속을 한두 문장으로 바로 답한다');
+  });
+
+  it('injects the tracked contract directly instead of relying on an external CLAUDE.md import', () => {
+    const runner = read('container/agent-runner/src/index.ts');
+    const prompt = read('container/agent-runner/src/destinations.ts');
+    const composer = read('src/claude-md-compose.ts');
+
+    expect(runner).toContain("fs.readFileSync(SHARED_INSTRUCTIONS_PATH, 'utf-8')");
+    expect(runner).toContain('buildSystemPromptAddendum(config.assistantName || undefined, sharedInstructions)');
+    expect(prompt).not.toContain("'# You are '");
+    expect(prompt).toContain('에이전트 이름은 **${assistantName}**다.');
+    expect(composer).not.toContain("imports.push('@./.claude-shared.md')");
   });
 
   it('keeps onboarding out of ordinary identity questions', () => {
