@@ -97,26 +97,18 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
    - 운영자의 Slack member ID
    - 에이전트 이름과 필요한 provider 인증 정보
 3. 코딩 에이전트가 `.env` 작성, `bash nanoclaw.sh`, Slack wiring과 응답 확인을 진행한다.
-4. GitHub 개인 계정 연결을 완료한 뒤 LBox 저장소를 clone하고 작업공간을 에이전트 그룹에 연결한다.
+4. GitHub 개인 계정 연결을 완료한 뒤 호스트 저장소 동기화를 설치하고, 읽기 전용 작업공간을 에이전트 그룹에 연결한다.
 
    ```bash
-   mkdir -p ~/nanoclaw-deploy ~/lbox-repos
-
-   while read -r name url; do
-     target="$HOME/lbox-repos/$name"
-     if [ -d "$target/.git" ]; then
-       git -C "$target" fetch --all --prune
-     else
-       git clone --filter=blob:none "$url" "$target"
-     fi
-   done < container/skills/lbox-product-code-search/repos.txt
+   mkdir -p ~/nanoclaw-deploy
+   bash scripts/team/install-repo-sync.sh
 
    pnpm exec tsx setup/index.ts --step mounts --force -- --json \
-     '{"allowedRoots":[{"path":"~/nanoclaw-deploy","allowReadWrite":true,"description":"team deploy trigger"},{"path":"~/lbox-repos","allowReadWrite":true,"description":"LBox reference repositories"}],"blockedPatterns":[]}'
+     '{"allowedRoots":[{"path":"~/nanoclaw-deploy","allowReadWrite":true,"description":"team deploy trigger"},{"path":"~/lbox-repos","allowReadWrite":false,"description":"LBox reference repositories"}],"blockedPatterns":[]}'
 
    # 그룹 id는 ./bin/ncl groups list로 확인한다.
    pnpm exec tsx scripts/q.ts data/v2.db \
-     "UPDATE container_configs SET additional_mounts='[{\"hostPath\":\"~/nanoclaw-deploy\",\"containerPath\":\"deploy\",\"readonly\":false},{\"hostPath\":\"~/lbox-repos\",\"containerPath\":\"lbox-repos\",\"readonly\":false}]' WHERE agent_group_id='<id>'"
+     "UPDATE container_configs SET additional_mounts='[{\"hostPath\":\"~/nanoclaw-deploy\",\"containerPath\":\"deploy\",\"readonly\":false},{\"hostPath\":\"~/lbox-repos\",\"containerPath\":\"lbox-repos\",\"readonly\":true}]' WHERE agent_group_id='<id>'"
 
    ./bin/ncl groups restart --id <id>
    ```
@@ -164,6 +156,22 @@ aws sso login --profile lbox-system
 목적지는 첨부파일명이다. 다른 이름으로 배포할 때는 target 범위 안의 상대
 `--destination`만 지정한다. 승인 전 staging 사본과 배포 전 백업은 Git에 포함되지
 않는 `data/team-lbox-aws/` 아래에 저장한다.
+
+## 코드 참조 저장소
+
+호스트의 `~/lbox-repos`는 AimClaw 코드 분석 전용 checkout이다. launchd가 15분마다
+`container/skills/lbox-product-code-search/repos.txt`의 원격 기본 브랜치로 갱신하고,
+에이전트 컨테이너에는 `/workspace/extra/lbox-repos`로 읽기 전용 마운트한다. 이
+디렉터리의 tracked 파일을 직접 수정하지 않는다. 다음 동기화 때 원격 상태로
+되돌아간다.
+
+수동 갱신과 상태 확인은 다음 명령을 사용한다.
+
+```bash
+bash scripts/team/sync-repos.sh
+cat ~/lbox-repos/.aimclaw-sync-status.json
+tail -100 ~/.local/state/aimclaw-repo-sync/sync.log
+```
 
 ## Upstream 갱신
 

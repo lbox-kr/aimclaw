@@ -9,8 +9,8 @@ description: LBox 기능의 구현 위치를 찾거나 UI·API 동작, 제품 �
 
 ## 절차
 
-1. `/workspace/extra/lbox-repos`가 없거나 필요한 저장소가 누락됐으면 설치 미완료를 알리고 중단한다.
-2. `/app/skills/lbox-product-code-search/repos.txt`에서 관련 저장소를 고르고 `git fetch --all --prune`한다. `pull`, `rebase`, `checkout`, `reset`은 요청 없이 실행하지 않는다.
+1. `/workspace/extra/lbox-repos`가 없거나 필요한 저장소가 누락됐으면 설치 미완료를 알리고 중단한다. `.aimclaw-sync-status.json`이 `syncing`이면 최대 30초 기다리고 다시 확인하며, `failed`면 현재 checkout으로 분석하되 최신화 실패 사실을 결과에 밝힌다.
+2. `/app/skills/lbox-product-code-search/repos.txt`에서 관련 저장소를 고른다. 저장소는 호스트가 주기적으로 갱신하고 컨테이너에는 읽기 전용으로 마운트되므로 `fetch`, `pull`, `checkout`, `reset` 등 Git 상태를 바꾸는 명령은 실행하지 않는다.
 3. 선택한 저장소의 `AGENTS.md`와 `CLAUDE.md`를 먼저 읽는다.
 4. 제품명, URL, 화면 문구, endpoint, 에러, 이벤트명, env, header를 `rg`로 찾고 다음 흐름을 잇는다.
    - 화면: FE route → page/component → state → API client와 response type
