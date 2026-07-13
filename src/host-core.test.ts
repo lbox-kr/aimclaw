@@ -31,6 +31,14 @@ import {
 import { getSession, findSession } from './db/sessions.js';
 import type { InboundEvent } from './channels/adapter.js';
 
+const routeMocks = vi.hoisted(() => ({
+  addSlackProcessingReaction: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('./custom/slack-processing-reaction.js', () => ({
+  addSlackProcessingReaction: routeMocks.addSlackProcessingReaction,
+}));
+
 // Mock container runner to prevent actual Docker spawning
 vi.mock('./container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(undefined),
@@ -420,7 +428,10 @@ describe('router', () => {
     db.close();
 
     expect(rows).toHaveLength(1);
-    expect(JSON.parse(rows[0].content).text).toBe('Hello agent!');
+    expect(JSON.parse(rows[0].content)).toMatchObject({
+      text: 'Hello agent!',
+      _nanoclawPlatformMessageId: 'msg-in-1',
+    });
 
     // Verify container was woken
     expect(wakeContainer).toHaveBeenCalled();
@@ -500,6 +511,7 @@ describe('router', () => {
     const { routeInbound } = await import('./router.js');
     const { wakeContainer } = await import('./container-runner.js');
     (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+    routeMocks.addSlackProcessingReaction.mockClear().mockRejectedValueOnce(new Error('Slack unavailable'));
 
     // Wire a second agent to the same messaging group.
     createAgentGroup({
@@ -529,8 +541,13 @@ describe('router', () => {
       message: { id: 'msg-fan', kind: 'chat', content: JSON.stringify({ text: 'hello all' }), timestamp: now() },
     });
 
-    // Both agents should now have their own session and be woken.
+    // UI acknowledgement is best-effort: one failed attempt must not block
+    // either agent, and it must start before the first container wake.
     expect(wakeContainer).toHaveBeenCalledTimes(2);
+    expect(routeMocks.addSlackProcessingReaction).toHaveBeenCalledTimes(1);
+    expect(routeMocks.addSlackProcessingReaction.mock.invocationCallOrder[0]).toBeLessThan(
+      (wakeContainer as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+    );
 
     const { getSessionsByAgentGroup } = await import('./db/sessions.js');
     expect(getSessionsByAgentGroup('ag-1')).toHaveLength(1);

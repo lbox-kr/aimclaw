@@ -81,8 +81,8 @@ export function writeMessageOut(msg: WriteMessageOut): number {
  * Look up a message's platform ID by seq number.
  * Searches both inbound and outbound DBs since seq spans both.
  *
- * For inbound messages, the Chat SDK message ID is already the platform message ID
- * (e.g., "6037840640:42" for Telegram).
+ * For inbound messages, the host preserves the platform message ID inside
+ * content because the row's primary key may be namespaced for session routing.
  *
  * For outbound messages, the internal ID (msg-xxx) won't work for edits/reactions.
  * Instead, look up the platform_message_id from the delivered table (host writes this
@@ -91,11 +91,23 @@ export function writeMessageOut(msg: WriteMessageOut): number {
 export function getMessageIdBySeq(seq: number): string | null {
   const inbound = getInboundDb();
 
-  // Inbound messages: ID is already the platform message ID
-  const inRow = inbound.prepare('SELECT id FROM messages_in WHERE seq = ?').get(seq) as
-    | { id: string }
+  // Inbound rows use a namespaced primary key. The host preserves the
+  // channel-native id in content so platform edits/reactions target the
+  // original message rather than the session-local key.
+  const inRow = inbound.prepare('SELECT id, content FROM messages_in WHERE seq = ?').get(seq) as
+    | { id: string; content: string }
     | undefined;
-  if (inRow) return inRow.id;
+  if (inRow) {
+    try {
+      const content = JSON.parse(inRow.content) as { _nanoclawPlatformMessageId?: unknown };
+      if (typeof content._nanoclawPlatformMessageId === 'string' && content._nanoclawPlatformMessageId) {
+        return content._nanoclawPlatformMessageId;
+      }
+    } catch {
+      // Legacy/non-JSON rows fall back to their historical id behavior.
+    }
+    return inRow.id;
+  }
 
   // Outbound messages: look up platform message ID from delivered table
   const outRow = getOutboundDb().prepare('SELECT id FROM messages_out WHERE seq = ?').get(seq) as

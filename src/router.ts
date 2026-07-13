@@ -20,6 +20,7 @@
 import { getChannelAdapter, getChannelDefaults } from './channels/channel-registry.js';
 import { resolveThreadPolicy, resolveUnknownSenderPolicy } from './channels/channel-defaults.js';
 import { gateCommand } from './command-gate.js';
+import { addSlackProcessingReaction } from './custom/slack-processing-reaction.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
@@ -318,6 +319,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   let engagedCount = 0;
   let accumulatedCount = 0;
   let subscribed = false;
+  let processingAcknowledged = false;
 
   for (const agent of agents) {
     const agentGroup = getAgentGroup(agent.agent_group_id);
@@ -348,6 +350,12 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     const scopeOk = engages && (!senderScopeGate || senderScopeGate(event, userId, mg, agent).allowed);
 
     if (engages && accessOk && scopeOk) {
+      if (!processingAcknowledged) {
+        processingAcknowledged = true;
+        void addSlackProcessingReaction(event).catch((err) => {
+          log.warn('Slack processing reaction failed', { messagingGroupId: mg.id, err });
+        });
+      }
       await deliverToAgent(agent, agentGroup, mg, event, userId, threadsEnabled, effectiveThreadId, true);
       engagedCount++;
 
@@ -524,7 +532,7 @@ async function deliverToAgent(
     platformId: deliveryAddr.platformId,
     channelType: deliveryAddr.channelType,
     threadId: deliveryAddr.threadId,
-    content: event.message.content,
+    content: stampPlatformMessageId(event.message.content, event.message.id),
     trigger: wake ? 1 : 0,
   });
 
@@ -559,6 +567,20 @@ async function deliverToAgent(
       // started so it doesn't leak; the inbound row stays pending.
       if (!woke) stopTypingRefresh(freshSession.id);
     }
+  }
+}
+
+/** Preserve the channel-native message id separately from NanoClaw's
+ * session-local primary key so edit/reaction tools can target the platform
+ * message after the primary key is namespaced for routing dedupe. */
+function stampPlatformMessageId(content: string, platformMessageId: string): string {
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return content;
+    parsed._nanoclawPlatformMessageId = platformMessageId;
+    return JSON.stringify(parsed);
+  } catch {
+    return content;
   }
 }
 
