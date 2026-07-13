@@ -422,7 +422,11 @@ themselves are never shown.
 - **`chat-sdk`** — same `<message>` shape, fields extracted from the serialized Chat SDK
   message. Attachments are appended inline: `[image: screenshot.png — saved to /workspace/…]`
   or `[image: screenshot.png (https://signed-url…)]`. Images/PDFs that Claude handles
-  natively are also passed as content blocks (see Media Handling below).
+  natively are also passed as content blocks (see Media Handling below). Slack user mentions
+  keep their sentence position and identity; `target="self"` identifies the current agent:
+  ```xml
+  <message sender="John"><mention id="U_BOT" name="에이미" target="self"/> 이 내용을 <mention id="U_MIN" name="민수" target="user"/>에게 보내줘</message>
+  ```
 
 - **`task`** — a `<task>` element, script output first when present:
   ```xml

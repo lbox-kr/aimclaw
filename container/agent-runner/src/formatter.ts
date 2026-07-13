@@ -184,7 +184,44 @@ function formatSingleChat(msg: MessageInRow): string {
 
   const fromAttr = originAttr(msg);
 
-  return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${escapeXml(text)}${attachmentsSuffix}</message>`;
+  return `<message${idAttr}${fromAttr} sender="${escapeXml(sender)}" time="${escapeXml(time)}"${replyAttr}>${replyPrefix}${formatChatText(text, content.inlineMentions)}${attachmentsSuffix}</message>`;
+}
+
+interface InlineMention {
+  id: string;
+  name: string;
+  target: 'self' | 'user';
+  start: number;
+  end: number;
+}
+
+function formatChatText(text: string, rawMentions: unknown): string {
+  if (!Array.isArray(rawMentions)) return escapeXml(text);
+
+  const mentions = rawMentions
+    .filter((mention): mention is InlineMention => {
+      if (!mention || typeof mention !== 'object') return false;
+      const value = mention as Partial<InlineMention>;
+      return (
+        typeof value.id === 'string' &&
+        typeof value.name === 'string' &&
+        (value.target === 'self' || value.target === 'user') &&
+        Number.isInteger(value.start) &&
+        Number.isInteger(value.end)
+      );
+    })
+    .sort((a, b) => a.start - b.start);
+
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const mention of mentions) {
+    if (mention.start < cursor || mention.end <= mention.start || mention.end > text.length) continue;
+    parts.push(escapeXml(text.slice(cursor, mention.start)));
+    parts.push(`<mention id="${escapeXml(mention.id)}" name="${escapeXml(mention.name)}" target="${mention.target}"/>`);
+    cursor = mention.end;
+  }
+  parts.push(escapeXml(text.slice(cursor)));
+  return parts.join('');
 }
 
 /**
