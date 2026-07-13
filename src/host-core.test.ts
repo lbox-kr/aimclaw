@@ -894,6 +894,23 @@ describe('router — per-wiring thread policy', () => {
     });
   });
 
+  it('thread-enabled DMs use per-thread sessions instead of merging concurrent requests', async () => {
+    getDb().prepare("UPDATE messaging_groups SET is_group = 0 WHERE id = 'mg-tp'").run();
+
+    await withThreadedAdapter(async () => {
+      const { routeInbound } = await import('./router.js');
+      const { getSessionsByAgentGroup } = await import('./db/sessions.js');
+      const event = threadedEvent('msg-dm-thread');
+      event.message.isGroup = false;
+
+      await routeInbound(event);
+
+      const sessions = getSessionsByAgentGroup('ag-tp');
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].thread_id).toBe('thread-42');
+    });
+  });
+
   it('wiring threads=0 nulls the event-derived thread for session and delivery', async () => {
     getDb().prepare("UPDATE messaging_group_agents SET threads = 0 WHERE id = 'mga-tp'").run();
 

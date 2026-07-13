@@ -9,4 +9,5 @@
  */
 import './current-thread-history.js';
 import './lbox-aws.js';
+import './slack-native-stream.js';
 import './slack-user-access.js';

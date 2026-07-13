@@ -342,6 +342,7 @@ export async function processQuery(
   let queryContinuation: string | undefined;
   let done = false;
   let unwrappedNudged = false;
+  let nativeStreamActive = false;
   // Prompt queue for the exchange hook — each result event consumes the
   // oldest unanswered prompt, except a wrapping-retry result, which answers
   // the same prompt again. Unused (and unmaintained) when the provider
@@ -470,6 +471,13 @@ export async function processQuery(
   try {
     for await (const event of query.events) {
       handleEvent(event, routing);
+      if (
+        event.type === 'task_update' &&
+        routing.channelType === 'slack' &&
+        routing.platformId
+      ) {
+        nativeStreamActive = true;
+      }
       touchHeartbeat();
 
       if (event.type === 'init') {
@@ -482,6 +490,7 @@ export async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
+        let keepNativeStreamOpen = false;
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -513,6 +522,7 @@ export async function processQuery(
               status: hasUnwrapped ? 'undelivered' : 'completed',
             });
             if (willRetryWrapping) {
+              keepNativeStreamOpen = true;
               unwrappedNudged = true;
               const destinations = getAllDestinations();
               const names = destinations.map((d) => d.name).join(', ');
@@ -530,6 +540,10 @@ export async function processQuery(
         } else {
           archivePrompts.shift();
         }
+        if (!keepNativeStreamOpen && nativeStreamActive) {
+          endNativeStream(routing);
+          nativeStreamActive = false;
+        }
       }
     }
   } catch (err) {
@@ -542,6 +556,10 @@ export async function processQuery(
     });
     throw err;
   } finally {
+    // A provider iterator can terminate without a result event when it is
+    // aborted or disconnected. Clean up an open Slack timeline instead of
+    // leaving it around until the host-side safety TTL.
+    if (nativeStreamActive) endNativeStream(routing);
     done = true;
     clearInterval(pollHandle);
   }
@@ -561,7 +579,7 @@ function notifyExchangeComplete(
   }
 }
 
-function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
+function handleEvent(event: ProviderEvent, routing: RoutingContext): void {
   switch (event.type) {
     case 'init':
       log(`Session: ${event.continuation}`);
@@ -577,7 +595,59 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
     case 'progress':
       log(`Progress: ${event.message}`);
       break;
+    case 'status':
+      log(`Status: ${event.message}`);
+      writeMessageOut({
+        id: generateId(),
+        in_reply_to: routing.inReplyTo,
+        kind: 'system',
+        content: JSON.stringify({ action: 'set_status', status: event.message }),
+      });
+      break;
+    case 'task_update':
+      log(`Task: ${event.task.title} (${event.task.status})`);
+      if (routing.channelType !== 'slack' || !routing.platformId) break;
+      writeMessageOut({
+        id: generateId(),
+        in_reply_to: routing.inReplyTo,
+        kind: 'system',
+        platform_id: routing.platformId,
+        channel_type: routing.channelType,
+        thread_id: routing.threadId,
+        content: JSON.stringify({
+          action: 'stream_task_update',
+          task: event.task,
+          routing: {
+            platformId: routing.platformId,
+            channelType: routing.channelType,
+            threadId: routing.threadId,
+            inReplyTo: routing.inReplyTo,
+          },
+        }),
+      });
+      break;
   }
+}
+
+function endNativeStream(routing: RoutingContext): void {
+  if (routing.channelType !== 'slack' || !routing.platformId) return;
+  writeMessageOut({
+    id: generateId(),
+    in_reply_to: routing.inReplyTo,
+    kind: 'system',
+    platform_id: routing.platformId,
+    channel_type: routing.channelType,
+    thread_id: routing.threadId,
+    content: JSON.stringify({
+      action: 'stream_end',
+      routing: {
+        platformId: routing.platformId,
+        channelType: routing.channelType,
+        threadId: routing.threadId,
+        inReplyTo: routing.inReplyTo,
+      },
+    }),
+  });
 }
 
 /**
@@ -596,7 +666,7 @@ function deliverErrorResult(text: string, routing: RoutingContext): void {
     platform_id: routing.platformId,
     channel_type: routing.channelType,
     thread_id: routing.threadId,
-    content: JSON.stringify({ text }),
+    content: JSON.stringify({ text, _nanoclawFinal: true }),
   });
 }
 
@@ -674,7 +744,7 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
     platform_id: platformId,
     channel_type: channelType,
     thread_id: destRouting?.threadId ?? null,
-    content: JSON.stringify({ text: body }),
+    content: JSON.stringify({ text: body, _nanoclawFinal: true }),
   });
 }
 

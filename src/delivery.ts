@@ -25,7 +25,7 @@ import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
-import type { OutboundFile } from './channels/adapter.js';
+import type { NativeStreamChunk, NativeStreamOptions, OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 
 const ACTIVE_POLL_MS = 1000;
@@ -62,7 +62,45 @@ export interface ChannelDeliveryAdapter {
      *  Host-internal only — containers never see instance. */
     instance?: string,
   ): Promise<string | undefined>;
-  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
+  setTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    status?: string,
+  ): Promise<void>;
+  stream?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    chunks: AsyncIterable<NativeStreamChunk>,
+    options?: NativeStreamOptions,
+    instance?: string,
+  ): Promise<string | undefined>;
+}
+
+interface DeliveryMessage {
+  id: string;
+  kind: string;
+  platform_id: string | null;
+  channel_type: string | null;
+  thread_id: string | null;
+  content: string;
+  in_reply_to: string | null;
+}
+
+export type FinalMessageDeliveryHandler = (
+  content: Record<string, unknown>,
+  message: DeliveryMessage,
+  session: Session,
+) => Promise<{ handled: boolean; messageId?: string }>;
+
+const finalMessageHandlers: FinalMessageDeliveryHandler[] = [];
+
+/** Register a platform-native final-answer path. Returning handled:false keeps
+ * the canonical postMessage delivery as the fallback. */
+export function registerFinalMessageDelivery(handler: FinalMessageDeliveryHandler): void {
+  finalMessageHandlers.push(handler);
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;
@@ -246,15 +284,7 @@ async function drainSession(session: Session): Promise<void> {
 }
 
 async function deliverMessage(
-  msg: {
-    id: string;
-    kind: string;
-    platform_id: string | null;
-    channel_type: string | null;
-    thread_id: string | null;
-    content: string;
-    in_reply_to: string | null;
-  },
+  msg: DeliveryMessage,
   session: Session,
   inDb: Database.Database,
 ): Promise<string | undefined> {
@@ -333,6 +363,19 @@ async function deliverMessage(
       }
     }
     deliverInstance = mg.instance;
+  }
+
+  // A provider-final message closes an already-running Slack task stream so
+  // progress cards and the answer remain one message. Mid-turn MCP sends do
+  // not carry this marker and therefore remain ordinary standalone messages.
+  if (content._nanoclawFinal === true) {
+    for (const handler of finalMessageHandlers) {
+      const result = await handler(content, msg, session);
+      if (result.handled) {
+        clearOutbox(session.agent_group_id, session.id, msg.id);
+        return result.messageId;
+      }
+    }
   }
 
   // Track pending questions for ask_user_question flow.

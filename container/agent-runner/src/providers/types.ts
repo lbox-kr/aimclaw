@@ -120,6 +120,12 @@ export interface AgentQuery {
   abort(): void;
 }
 
+export interface ProviderTaskUpdate {
+  id: string;
+  title: string;
+  status: 'in_progress' | 'complete' | 'error';
+}
+
 export type ProviderEvent =
   | { type: 'init'; continuation: string }
   /**
@@ -131,6 +137,10 @@ export type ProviderEvent =
   | { type: 'result'; text: string | null; isError?: boolean }
   | { type: 'error'; message: string; retryable: boolean; classification?: string }
   | { type: 'progress'; message: string }
+  /** Short, user-facing working state for native channel indicators. */
+  | { type: 'status'; message: string }
+  /** Safe, user-facing lifecycle for a meaningful long-running task. */
+  | { type: 'task_update'; task: ProviderTaskUpdate }
   /**
    * Liveness signal. Providers MUST yield this on every underlying SDK
    * event (tool call, thinking, partial message, anything) so the

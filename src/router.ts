@@ -484,12 +484,13 @@ async function deliverToAgent(
 ): Promise<void> {
   // Apply the resolved thread policy (wiring override AND channel declaration
   // AND adapter capability — resolveThreadPolicy at fanout): thread-enabled
-  // wiring in a group chat → per-thread session regardless of wiring
-  // session_mode. agent-shared preserved (it's a cross-channel directive the
-  // adapter doesn't know about). DMs collapse sub-threads to one session
-  // (is_group=0 short-circuit).
+  // wiring in a threaded chat → per-thread session regardless of wiring
+  // session_mode. agent-shared is preserved because it is an explicit
+  // cross-channel directive. Keeping DM threads isolated is important for
+  // native assistant status/streaming and prevents concurrent root requests
+  // from being pushed into one provider turn.
   let effectiveSessionMode = agent.session_mode;
-  if (threadsEnabled && effectiveSessionMode !== 'agent-shared' && mg.is_group !== 0) {
+  if (threadsEnabled && effectiveSessionMode !== 'agent-shared') {
     effectiveSessionMode = 'per-thread';
   }
 

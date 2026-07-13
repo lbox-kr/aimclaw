@@ -4,7 +4,15 @@
  * Channels self-register on import. The host calls initChannelAdapters() at startup
  * to instantiate and set up all registered adapters.
  */
-import type { ChannelAdapter, ChannelDefaults, ChannelRegistration, ChannelSetup, OutboundFile } from './adapter.js';
+import type {
+  ChannelAdapter,
+  ChannelDefaults,
+  ChannelRegistration,
+  ChannelSetup,
+  NativeStreamChunk,
+  NativeStreamOptions,
+  OutboundFile,
+} from './adapter.js';
 import type { ChannelDeliveryAdapter } from '../delivery.js';
 import { log } from '../log.js';
 
@@ -95,9 +103,21 @@ export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
       platformId: string,
       threadId: string | null,
       instance?: string,
+      status?: string,
     ): Promise<void> {
       const adapter = getChannelAdapterExact(instance ?? channelType);
-      await adapter?.setTyping?.(platformId, threadId);
+      await adapter?.setTyping?.(platformId, threadId, status);
+    },
+    async stream(
+      channelType: string,
+      platformId: string,
+      threadId: string | null,
+      chunks: AsyncIterable<NativeStreamChunk>,
+      options?: NativeStreamOptions,
+      instance?: string,
+    ): Promise<string | undefined> {
+      const adapter = getChannelAdapterExact(instance ?? channelType);
+      return adapter?.stream?.(platformId, threadId, chunks, options);
     },
   };
 }

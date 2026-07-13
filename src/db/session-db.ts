@@ -261,7 +261,7 @@ export function getDueOutboundMessages(db: Database.Database): OutboundMessage[]
     .prepare(
       `SELECT * FROM messages_out
        WHERE (deliver_after IS NULL OR datetime(deliver_after) <= datetime('now'))
-       ORDER BY timestamp ASC`,
+       ORDER BY timestamp ASC, seq ASC`,
     )
     .all() as OutboundMessage[];
 }

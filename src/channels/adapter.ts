@@ -104,6 +104,27 @@ export interface OutboundMessage {
   files?: OutboundFile[]; // file attachments from the session outbox
 }
 
+export type NativeStreamChunk =
+  | { type: 'markdown_text'; text: string }
+  | {
+      type: 'task_update';
+      id: string;
+      title: string;
+      status: 'in_progress' | 'complete' | 'error';
+    };
+
+export interface NativeStreamOptions {
+  recipientUserId?: string;
+  recipientTeamId?: string;
+  taskDisplayMode?: 'timeline';
+}
+
+/** Non-secret platform identifiers required to address a native stream. */
+export interface NativeStreamContext {
+  recipientUserId?: string;
+  recipientTeamId?: string;
+}
+
 /** Discovered conversation info (from syncConversations). */
 export interface ConversationInfo {
   platformId: string;
@@ -134,9 +155,8 @@ export interface ChannelContextDefaults {
   engagePattern?: string;
   /**
    * Whether thread ids are honored in this context by default.
-   *  true  — inbound thread ids flow into messages_in and (in groups) force
-   *          per-thread session identity; replies, typing, and cards land
-   *          in-thread.
+   *  true  — inbound thread ids flow into messages_in and force per-thread
+   *          session identity. Replies, typing, and cards land in-thread.
    *  false — thread ids are nulled per-wiring at router fanout; sessions
    *          collapse; replies land top-level.
    * MUST be false when `supportsThreads` is false (capability bound; the
@@ -206,7 +226,16 @@ export interface ChannelAdapter {
   deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined>;
 
   // Optional
-  setTyping?(platformId: string, threadId: string | null): Promise<void>;
+  /** Show the platform's native working indicator. Platforms with richer
+   * agent UI (Slack) may render `status` as short progress text. */
+  setTyping?(platformId: string, threadId: string | null, status?: string): Promise<void>;
+  /** Stream structured progress and the final answer into one native message. */
+  stream?(
+    platformId: string,
+    threadId: string | null,
+    chunks: AsyncIterable<NativeStreamChunk>,
+    options?: NativeStreamOptions,
+  ): Promise<string | undefined>;
   syncConversations?(): Promise<ConversationInfo[]>;
   resolveChannelName?(platformId: string): Promise<string | null>;
 

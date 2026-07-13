@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '../db/connection.js';
 import { getUndeliveredMessages } from '../db/messages-out.js';
-import { addReaction, sendMessage } from './core.js';
+import { addReaction, sendMessage, setStatus } from './core.js';
 
 /**
  * Publish the a2a reply stamp the way the poll loop does: a direct write to
@@ -72,6 +72,23 @@ describe('send_message MCP tool — in_reply_to plumbing', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(out[0].in_reply_to).toBeNull();
+  });
+});
+
+describe('set_status MCP tool', () => {
+  it('writes a host-only action without adding a conversation message', async () => {
+    publishInReplyTo('inbound-msg-1');
+
+    await setStatus.handler({ status: '  Jira에서 할 일을 조회하는 중이에요  ' });
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('system');
+    expect(out[0].in_reply_to).toBe('inbound-msg-1');
+    expect(JSON.parse(out[0].content)).toEqual({
+      action: 'set_status',
+      status: 'Jira에서 할 일을 조회하는 중이에요',
+    });
   });
 });
 
