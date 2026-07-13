@@ -183,7 +183,7 @@ describe('buildMounts agent surfaces', () => {
     expect(fs.existsSync(path.join(GROUPS_DIR, ag.folder, 'CLAUDE.md'))).toBe(true);
   });
 
-  it('suppresses the default surfaces and keeps contributed mounts for a surfaces-providing provider', () => {
+  it('keeps the runner contract while suppressing provider-owned default surfaces', () => {
     const ag = group('ag-mounts-surfy', 'mounts-surfy');
     createAgentGroup(ag);
     ensureContainerConfig(ag.id);
@@ -202,8 +202,10 @@ describe('buildMounts agent surfaces', () => {
 
     const containerPaths = mounts.map((m) => m.containerPath);
     expect(containerPaths).not.toContain('/home/node/.claude');
-    expect(containerPaths).not.toContain('/app/CLAUDE.md');
     expect(containerPaths).not.toContain('/workspace/agent/CLAUDE.md');
+    // The agent-runner reads the shared contract directly for every provider;
+    // it is runner input, not a provider-owned project-memory surface.
+    expect(containerPaths).toContain('/app/CLAUDE.md');
     // Composer did NOT run for this group.
     expect(fs.existsSync(path.join(GROUPS_DIR, ag.folder, 'CLAUDE.md'))).toBe(false);
     // Core mounts and the provider's own contribution are intact.

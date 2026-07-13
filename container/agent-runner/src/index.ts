@@ -39,6 +39,7 @@ function log(msg: string): void {
 }
 
 const CWD = '/workspace/agent';
+const SHARED_INSTRUCTIONS_PATH = '/app/CLAUDE.md';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -46,13 +47,13 @@ async function main(): Promise<void> {
 
   log(`Starting v2 agent-runner (provider: ${providerName})`);
 
-  // Runtime-generated system-prompt addendum: agent identity (name) plus
-  // the live destinations map. Everything else (capabilities, per-module
-  // instructions, per-channel formatting) is loaded by Claude Code from
-  // /workspace/agent/CLAUDE.md — the composed entry imports the shared
-  // base (/app/CLAUDE.md) and each enabled module's fragment. Per-group
-  // memory lives in /workspace/agent/CLAUDE.local.md (auto-loaded).
-  const instructions = buildSystemPromptAddendum(config.assistantName || undefined);
+  // The tracked shared contract is system-prompt material, not project memory:
+  // read the mounted source directly so identity and voice do not depend on an
+  // external CLAUDE.md import being approved or followed. Per-module and
+  // per-channel fragments remain in /workspace/agent/CLAUDE.md; per-group
+  // memory remains in CLAUDE.local.md.
+  const sharedInstructions = fs.readFileSync(SHARED_INSTRUCTIONS_PATH, 'utf-8');
+  const instructions = buildSystemPromptAddendum(config.assistantName || undefined, sharedInstructions);
 
   // Discover additional directories mounted at /workspace/extra/*
   const additionalDirectories: string[] = [];

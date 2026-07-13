@@ -73,20 +73,32 @@ export function findByRouting(
 }
 
 /**
- * Generate the system-prompt addendum: agent identity + destination map.
+ * Generate the system-prompt addendum: shared standing instructions, live
+ * destination map, and the per-group display name.
  *
- * Identity is injected here (not in the shared CLAUDE.md) because it's
- * per-agent-group and changes when the operator renames an agent, while
- * the shared base is identical across all agents.
+ * The tracked shared contract is injected directly at system-prompt tier so
+ * critical identity and voice rules never depend on CLAUDE.md import approval
+ * or best-effort project-memory loading. The neutral per-group name declaration
+ * remains last so a renamed display name is reflected without duplicating
+ * response-style rules from the shared contract.
  */
-export function buildSystemPromptAddendum(assistantName?: string): string {
+export function buildSystemPromptAddendum(assistantName?: string, sharedInstructions?: string): string {
   const sections: string[] = [];
 
-  if (assistantName) {
-    sections.push(['# You are ' + assistantName, '', `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`].join('\n'));
-  }
+  const shared = sharedInstructions?.trim();
+  if (shared) sections.push(shared);
 
   sections.push(buildDestinationsSection());
+
+  if (assistantName) {
+    sections.push(
+      [
+        '# 에이전트 이름',
+        '',
+        `에이전트 이름은 **${assistantName}**다.`,
+      ].join('\n'),
+    );
+  }
 
   return sections.join('\n\n');
 }

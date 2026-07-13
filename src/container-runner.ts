@@ -283,8 +283,9 @@ export function buildMounts(
     // Sync skill symlinks based on container.json selection before mounting.
     syncSkillSymlinks(claudeDir, containerConfig);
 
-    // Compose CLAUDE.md fresh every spawn from the shared base, enabled skill
-    // fragments, and MCP server instructions. See `claude-md-compose.ts`.
+    // Compose CLAUDE.md fresh every spawn from enabled skill fragments and MCP
+    // server instructions. The shared contract is injected separately below.
+    // See `claude-md-compose.ts`.
     composeGroupClaudeMd(agentGroup);
   }
 
@@ -305,13 +306,10 @@ export function buildMounts(
     mounts.push({ hostPath: containerJsonPath, containerPath: '/workspace/agent/container.json', readonly: true });
   }
 
-  // Composer-managed CLAUDE.md artifacts — nested RO mounts. These are
-  // regenerated from the shared base + fragments on every spawn; any
-  // agent-side writes would be clobbered, so enforce read-only. Only
-  // CLAUDE.local.md (per-group memory) remains RW via the group-dir mount.
-  // `.claude-shared.md` is a symlink whose target (`/app/CLAUDE.md`) is
-  // already RO-mounted, so writes through it fail regardless — no need for
-  // a nested mount there.
+  // Composer-managed CLAUDE.md artifacts — nested RO mounts. These contain
+  // project-memory fragments and are regenerated on every spawn; any agent-side
+  // writes would be clobbered, so enforce read-only. Only CLAUDE.local.md
+  // (per-group memory) remains RW via the group-dir mount.
   const composedClaudeMd = path.join(groupDir, 'CLAUDE.md');
   if (defaultSurfaces && fs.existsSync(composedClaudeMd)) {
     mounts.push({ hostPath: composedClaudeMd, containerPath: '/workspace/agent/CLAUDE.md', readonly: true });
@@ -321,10 +319,10 @@ export function buildMounts(
     mounts.push({ hostPath: fragmentsDir, containerPath: '/workspace/agent/.claude-fragments', readonly: true });
   }
 
-  // Shared CLAUDE.md — read-only, imported by the composed entry point via
-  // the `.claude-shared.md` symlink inside the group dir.
+  // Shared standing contract — read-only and injected directly into every
+  // provider's system context by the agent-runner.
   const sharedClaudeMd = path.join(process.cwd(), 'container', 'CLAUDE.md');
-  if (defaultSurfaces && fs.existsSync(sharedClaudeMd)) {
+  if (fs.existsSync(sharedClaudeMd)) {
     mounts.push({ hostPath: sharedClaudeMd, containerPath: '/app/CLAUDE.md', readonly: true });
   }
 

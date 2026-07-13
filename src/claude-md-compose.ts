@@ -3,11 +3,14 @@
  *
  * Replaces the per-group "written once at init, owned by the group" pattern
  * with a host-regenerated entry point that imports:
- *   - a shared base (`container/CLAUDE.md` mounted RO at `/app/CLAUDE.md`)
  *   - optional per-skill fragments (skills that ship `instructions.md`)
  *   - optional per-MCP-server fragments (inline `instructions` field in
  *     `container.json`)
  *   - per-group agent memory (`CLAUDE.local.md`, auto-loaded by Claude Code)
+ *
+ * The shared base (`container/CLAUDE.md`) is mounted at `/app/CLAUDE.md` and
+ * injected directly by the agent-runner at system-prompt tier. It is not an
+ * external CLAUDE.md import.
  *
  * Runs on every spawn from `container-runner.buildMounts()`. Deterministic —
  * same inputs produce the same CLAUDE.md, and stale fragments are pruned.
@@ -23,13 +26,12 @@ import { readGroupPersona } from './group-persona.js';
 import { log } from './log.js';
 import type { AgentGroup } from './types.js';
 
-// Fragment holding a template's persona prepend. Imported FIRST (before the
-// shared base) so the persona is the top of the composed system prompt.
+// Fragment holding a template's persona prepend. Imported first among the
+// project-memory fragments.
 const PERSONA_FRAGMENT = 'persona.md';
 
 // Symlink targets are container paths — dangling on host (hence the readlink
 // dance instead of existsSync), valid inside the container via RO mounts.
-const SHARED_CLAUDE_MD_CONTAINER_PATH = '/app/CLAUDE.md';
 const SHARED_SKILLS_CONTAINER_BASE = '/app/skills';
 const SHARED_MCP_TOOLS_CONTAINER_BASE = '/app/src/mcp-tools';
 
@@ -43,9 +45,9 @@ const LEGACY_PERSONAL_AGENT_SEED =
   /^# [^\r\n]+\r?\n\r?\nYou are [^\r\n]+, a personal NanoClaw agent for [^\r\n]+\. When the user first reaches out(?: \(or you receive a system welcome prompt\))?, introduce yourself briefly and invite them to chat\. Keep replies concise\.\r?\n*/;
 
 /**
- * Regenerate `groups/<folder>/CLAUDE.md` from the shared base, enabled skill
- * fragments, and MCP server fragments declared in `container.json`. Creates
- * an empty `CLAUDE.local.md` if missing.
+ * Regenerate `groups/<folder>/CLAUDE.md` from enabled skill and MCP server
+ * fragments declared in `container.json`. Creates an empty `CLAUDE.local.md`
+ * if missing.
  */
 export function composeGroupClaudeMd(group: AgentGroup): void {
   const groupDir = path.resolve(GROUPS_DIR, group.folder);
@@ -53,8 +55,10 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
     fs.mkdirSync(groupDir, { recursive: true });
   }
 
-  const sharedLink = path.join(groupDir, '.claude-shared.md');
-  syncSymlink(sharedLink, SHARED_CLAUDE_MD_CONTAINER_PATH);
+  // Retired: the shared contract is now injected directly into the system
+  // prompt. Remove the old external symlink so headless Claude Code never has
+  // to approve it and cannot load the same contract twice.
+  fs.rmSync(path.join(groupDir, '.claude-shared.md'), { force: true });
 
   const fragmentsDir = path.join(groupDir, '.claude-fragments');
   if (!fs.existsSync(fragmentsDir)) {
@@ -143,13 +147,13 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
     }
   }
 
-  // Composed entry — imports only. Persona first (top of the system prompt),
-  // then the shared base, then the remaining fragments sorted.
+  // Composed entry — project-memory imports only. Persona first, then the
+  // remaining fragments sorted. The shared contract is already in the system
+  // prompt and must not be duplicated here.
   const imports: string[] = [];
   if (desired.has(PERSONA_FRAGMENT)) {
     imports.push(`@./.claude-fragments/${PERSONA_FRAGMENT}`);
   }
-  imports.push('@./.claude-shared.md');
   for (const name of [...desired.keys()].filter((n) => n !== PERSONA_FRAGMENT).sort()) {
     imports.push(`@./.claude-fragments/${name}`);
   }
