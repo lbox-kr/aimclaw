@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '../db/connection.js';
 import { getUndeliveredMessages } from '../db/messages-out.js';
-import { sendMessage } from './core.js';
+import { addReaction, sendMessage } from './core.js';
 
 /**
  * Publish the a2a reply stamp the way the poll loop does: a direct write to
@@ -72,5 +72,34 @@ describe('send_message MCP tool — in_reply_to plumbing', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(out[0].in_reply_to).toBeNull();
+  });
+});
+
+describe('add_reaction MCP tool — inbound platform id', () => {
+  it('targets the original platform message id instead of the namespaced row id', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in
+           (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+         VALUES (?, ?, 'chat-sdk', ?, 'pending', ?, 'slack', ?, ?)`,
+      )
+      .run(
+        '1712345678.000100:ag-1',
+        2,
+        new Date().toISOString(),
+        'slack:C1',
+        'slack:C1:1712345678.000100',
+        JSON.stringify({ text: 'hello', _nanoclawPlatformMessageId: '1712345678.000100' }),
+      );
+
+    await addReaction.handler({ messageId: 2, emoji: 'eyes' });
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content)).toEqual({
+      operation: 'reaction',
+      messageId: '1712345678.000100',
+      emoji: 'eyes',
+    });
   });
 });
