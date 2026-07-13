@@ -23,6 +23,7 @@ import {
   type Message as ChatMessage,
 } from 'chat';
 import { log } from '../log.js';
+import { collectSlackInlineMentions } from '../custom/slack-mentions.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
@@ -210,6 +211,9 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       serialized.sender = name;
       serialized.senderName = name;
     }
+
+    const inlineMentions = await collectSlackInlineMentions(adapter, message);
+    if (inlineMentions.length > 0) serialized.inlineMentions = inlineMentions;
 
     // Drop raw to save DB space (can be very large)
     serialized.raw = undefined;

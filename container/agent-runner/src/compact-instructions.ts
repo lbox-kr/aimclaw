@@ -19,6 +19,7 @@ const instructions = [
   '',
   '1. For recent messages, keep the full XML structure including all attributes:',
   '   - <message from="..." sender="..." time="..."> for chat messages',
+  '     Keep inline <mention id="..." name="..." target="self|user"/> elements; target="self" is the current agent.',
   '   - <task from="..." time="..."> for scheduled tasks',
   '   - <webhook from="..." source="..." event="..."> for webhooks',
   '   The message content can be summarized if long, but the XML tags and attributes must remain.',

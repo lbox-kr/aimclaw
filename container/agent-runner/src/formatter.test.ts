@@ -173,6 +173,50 @@ describe('XML escaping', () => {
   });
 });
 
+describe('inline mentions', () => {
+  it('preserves mention positions and identifies the current agent', () => {
+    const text = '@U_BOT 이 내용을 @민수에게 보내줘';
+    insertMessage('m1', 'chat-sdk', {
+      sender: 'Alice',
+      text,
+      inlineMentions: [
+        {
+          id: 'U_BOT',
+          name: '에이미',
+          target: 'self',
+          start: text.indexOf('@U_BOT'),
+          end: text.indexOf('@U_BOT') + '@U_BOT'.length,
+        },
+        {
+          id: 'U_MIN',
+          name: '민수',
+          target: 'user',
+          start: text.indexOf('@민수'),
+          end: text.indexOf('@민수') + '@민수'.length,
+        },
+      ],
+    });
+
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain(
+      '<mention id="U_BOT" name="에이미" target="self"/> 이 내용을 ' +
+        '<mention id="U_MIN" name="민수" target="user"/>에게 보내줘',
+    );
+  });
+
+  it('escapes mention attributes without escaping the tag', () => {
+    const text = '@unsafe';
+    insertMessage('m1', 'chat-sdk', {
+      sender: 'Alice',
+      text,
+      inlineMentions: [{ id: 'U<&', name: 'A "<&', target: 'user', start: 0, end: text.length }],
+    });
+
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('<mention id="U&lt;&amp;" name="A &quot;&lt;&amp;" target="user"/>');
+  });
+});
+
 describe('stripInternalTags', () => {
   it('strips single-line internal tags and trims', () => {
     expect(stripInternalTags('hello <internal>secret</internal> world')).toBe('hello  world');
