@@ -12,11 +12,11 @@ describe('createProvider', () => {
   it('uses Haiku by default while preserving an explicit Claude model', () => {
     const defaultProvider = createProvider('claude') as unknown as { model?: string };
     const configuredProvider = createProvider('claude', {
-      model: 'claude-opus-4-8',
+      model: 'opus',
     }) as unknown as { model?: string };
 
-    expect(defaultProvider.model).toBe('claude-haiku-4-5-20251001');
-    expect(configuredProvider.model).toBe('claude-opus-4-8');
+    expect(defaultProvider.model).toBe('haiku');
+    expect(configuredProvider.model).toBe('opus');
   });
 
   it('returns MockProvider for mock', () => {

@@ -69,10 +69,7 @@ export interface ProviderOptions {
   mcpServers?: Record<string, McpServerConfig>;
   env?: Record<string, string | undefined>;
   additionalDirectories?: string[];
-  /**
-   * Model alias (`sonnet`, `opus`, `haiku`) or full model ID. Passed through
-   * to the underlying SDK. If omitted, the provider's product default is used.
-   */
+  /** Model alias (`sonnet`, `opus`, `haiku`) or full model ID. */
   model?: string;
   /**
    * Reasoning effort (`'low' | 'medium' | 'high' | 'xhigh' | 'max'`). Passed

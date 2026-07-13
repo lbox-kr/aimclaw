@@ -329,11 +329,6 @@ function transcriptStartMs(transcriptPath: string): number | null {
  */
 const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || '165000';
 
-// AimClaw keeps the main Slack loop cheap and responsive. Harder work is
-// delegated to an Opus Task by the shared instructions in container/CLAUDE.md;
-// an explicit per-group model setting still wins over this product default.
-const DEFAULT_CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
-
 /**
  * Stale-session detection. Matches Claude Code's error text when a
  * resumed session can't be found — missing transcript .jsonl, unknown
@@ -355,7 +350,7 @@ export class ClaudeProvider implements AgentProvider {
     this.assistantName = options.assistantName;
     this.mcpServers = options.mcpServers ?? {};
     this.additionalDirectories = options.additionalDirectories;
-    this.model = options.model ?? DEFAULT_CLAUDE_MODEL;
+    this.model = options.model ?? 'haiku';
     this.effort = options.effort;
     this.env = {
       ...(options.env ?? {}),
