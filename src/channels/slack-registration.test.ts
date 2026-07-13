@@ -22,11 +22,11 @@
  * channel (discord, telegram, teams, gchat, webex, …) follows this same shape:
  * swap the channel name below and the adapter package in the build.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import { getChannelDefaults, getRegisteredChannelNames } from './channel-registry.js';
 import './index.js'; // the real barrel — triggers every channel's self-registration
-import { anchorSlackRootDm, extractSlackStreamContext } from './slack.js';
+import { anchorSlackRootDm, extractSlackStreamContext, setSlackAssistantStatus } from './slack.js';
 
 describe('slack channel registration', () => {
   it('registers slack via the channel barrel', () => {
@@ -58,5 +58,21 @@ describe('slack channel registration', () => {
         raw: { team_id: 'T123', token: 'must-not-be-projected', text: 'private message' },
       } as never),
     ).toEqual({ recipientUserId: 'U123', recipientTeamId: 'T123' });
+  });
+
+  it('sets and clears one native status without loading-message duplication', async () => {
+    const setAssistantStatus = vi.fn().mockResolvedValue(undefined);
+    const adapter = {
+      decodeThreadId: vi.fn().mockReturnValue({ channel: 'D123', threadTs: '1783934548.123400' }),
+      setAssistantStatus,
+    };
+
+    await setSlackAssistantStatus(adapter, 'slack:D123:1783934548.123400', '요청을 처리하고 있어요');
+    await setSlackAssistantStatus(adapter, 'slack:D123:1783934548.123400', '');
+
+    expect(setAssistantStatus.mock.calls).toEqual([
+      ['D123', '1783934548.123400', '요청을 처리하고 있어요'],
+      ['D123', '1783934548.123400', ''],
+    ]);
   });
 });

@@ -13,6 +13,24 @@ import type { ChannelDefaults, InboundMessage, NativeStreamContext } from './ada
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
+interface SlackAssistantStatusAdapter {
+  decodeThreadId(threadId: string): { channel: string; threadTs?: string };
+  setAssistantStatus(channelId: string, threadTs: string, status: string): Promise<void>;
+}
+
+/** Use the Assistants API directly so one status is rendered without the
+ * adapter's duplicate `loading_messages` row. An empty status explicitly
+ * clears Slack's remote indicator. */
+export async function setSlackAssistantStatus(
+  adapter: SlackAssistantStatusAdapter,
+  threadId: string,
+  status: string,
+): Promise<void> {
+  const { channel, threadTs } = adapter.decodeThreadId(threadId);
+  if (!threadTs) return;
+  await adapter.setAssistantStatus(channel, threadTs, status);
+}
+
 /**
  * Dedicated bot app on a threaded platform. group threads:true keeps
  * mention-sticky bounded — engagement sticks per-thread, not forever.
@@ -76,6 +94,9 @@ registerChannelAdapter('slack', {
       // readability. The bridge prefers paragraph boundaries when splitting.
       maxTextLength: 4000,
     });
+    bridge.setTyping = (platformId, threadId, status) =>
+      setSlackAssistantStatus(slackAdapter, threadId ?? platformId, status ?? 'Typing...');
+    bridge.clearTyping = (platformId, threadId) => setSlackAssistantStatus(slackAdapter, threadId ?? platformId, '');
     const setupBridge = bridge.setup.bind(bridge);
     bridge.setup = (hostConfig) =>
       setupBridge({

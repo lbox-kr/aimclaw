@@ -53,6 +53,7 @@ interface TypingAdapter {
     instance?: string,
     status?: string,
   ): Promise<void>;
+  clearTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
 }
 
 interface TypingTarget {
@@ -70,6 +71,7 @@ interface TypingTarget {
 
 let adapter: TypingAdapter | null = null;
 const typingRefreshers = new Map<string, TypingTarget>();
+const typingOperations = new Map<string, Promise<void>>();
 
 /**
  * Bind the typing module to the channel delivery adapter so it can
@@ -82,18 +84,30 @@ export function setTypingAdapter(a: TypingAdapter): void {
   adapter = a;
 }
 
-async function triggerTyping(
+function queueTypingOperation(sessionId: string, operation: () => Promise<void>): Promise<void> {
+  const previous = typingOperations.get(sessionId) ?? Promise.resolve();
+  const current = previous
+    .catch(() => {})
+    .then(operation)
+    .catch(() => {});
+  typingOperations.set(sessionId, current);
+  void current.then(() => {
+    if (typingOperations.get(sessionId) === current) typingOperations.delete(sessionId);
+  });
+  return current;
+}
+
+function triggerTyping(
+  sessionId: string,
   channelType: string,
   platformId: string,
   threadId: string | null,
   instance?: string,
   status?: string,
 ): Promise<void> {
-  try {
+  return queueTypingOperation(sessionId, async () => {
     await adapter?.setTyping?.(channelType, platformId, threadId, instance, status);
-  } catch {
-    // Typing is best-effort — don't let it fail delivery or routing.
-  }
+  });
 }
 
 function isHeartbeatFresh(agentGroupId: string, sessionId: string): boolean {
@@ -122,7 +136,7 @@ export function startTypingRefresh(
     // the container-wake latency budget. Also clear any lingering
     // post-delivery pause: a new inbound means the user expects
     // typing to show immediately.
-    triggerTyping(channelType, platformId, threadId, instance, status).catch(() => {});
+    void triggerTyping(sessionId, channelType, platformId, threadId, instance, status);
     existing.startedAt = Date.now();
     existing.pausedUntil = 0;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
@@ -140,7 +154,7 @@ export function startTypingRefresh(
   }
 
   // Immediate tick + periodic refresh.
-  triggerTyping(channelType, platformId, threadId, instance, status).catch(() => {});
+  void triggerTyping(sessionId, channelType, platformId, threadId, instance, status);
   const startedAt = Date.now();
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
@@ -153,13 +167,13 @@ export function startTypingRefresh(
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
-      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.status).catch(() => {});
+      void triggerTyping(sessionId, entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.status);
       return;
     }
 
-    // Out of grace AND heartbeat stale — agent is idle, stop refreshing.
-    clearInterval(entry.interval);
-    typingRefreshers.delete(sessionId);
+    // Out of grace AND heartbeat stale — agent is idle, clear the remote
+    // indicator as well as the local refresher.
+    void completeTypingRefresh(sessionId);
   }, TYPING_REFRESH_MS);
   // unref so a stale refresher can't hold the event loop alive.
   interval.unref();
@@ -184,7 +198,7 @@ export function updateTypingStatus(sessionId: string, status: string): void {
   if (!entry) return;
   entry.status = status;
   entry.pausedUntil = 0;
-  triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, status).catch(() => {});
+  void triggerTyping(sessionId, entry.channelType, entry.platformId, entry.threadId, entry.instance, status);
 }
 
 /**
@@ -199,9 +213,22 @@ export function pauseTypingRefreshAfterDelivery(sessionId: string): void {
   entry.pausedUntil = Date.now() + POST_DELIVERY_PAUSE_MS;
 }
 
-export function stopTypingRefresh(sessionId: string): void {
+/** Finish one request. Stop future refreshes first, then enqueue the remote
+ * clear behind any in-flight status update so a late response cannot revive
+ * the indicator after completion. */
+export async function completeTypingRefresh(sessionId: string): Promise<void> {
   const entry = typingRefreshers.get(sessionId);
-  if (!entry) return;
+  if (!entry) {
+    await typingOperations.get(sessionId);
+    return;
+  }
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
+  await queueTypingOperation(sessionId, async () => {
+    await adapter?.clearTyping?.(entry.channelType, entry.platformId, entry.threadId, entry.instance);
+  });
+}
+
+export function stopTypingRefresh(sessionId: string): void {
+  void completeTypingRefresh(sessionId);
 }

@@ -24,7 +24,7 @@ import {
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
-import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
+import { completeTypingRefresh, pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
 import type { NativeStreamChunk, NativeStreamOptions, OutboundFile } from './channels/adapter.js';
 import type { Session } from './types.js';
 
@@ -69,6 +69,7 @@ export interface ChannelDeliveryAdapter {
     instance?: string,
     status?: string,
   ): Promise<void>;
+  clearTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
   stream?(
     channelType: string,
     platformId: string,
@@ -251,7 +252,12 @@ async function drainSession(session: Session): Promise<void> {
         // shouldn't get a gap in their typing indicator for them.
         if (msg.kind !== 'system' && msg.channel_type !== 'agent') {
           clearProcessingReaction(msg.in_reply_to);
-          pauseTypingRefreshAfterDelivery(session.id);
+          const content = JSON.parse(msg.content) as { _nanoclawFinal?: unknown };
+          if (content._nanoclawFinal === true) {
+            await completeTypingRefresh(session.id);
+          } else {
+            pauseTypingRefreshAfterDelivery(session.id);
+          }
         }
       } catch (err) {
         const attempts = (deliveryAttempts.get(msg.id) ?? 0) + 1;

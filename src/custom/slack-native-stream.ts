@@ -12,7 +12,7 @@ import type { NativeStreamChunk, NativeStreamContext } from '../channels/adapter
 import { getMessagingGroup, getMessagingGroupByPlatform } from '../db/messaging-groups.js';
 import { getDeliveryAdapter, registerDeliveryAction, registerFinalMessageDelivery } from '../delivery.js';
 import { log } from '../log.js';
-import { pauseTypingRefreshAfterDelivery, updateTypingStatus } from '../modules/typing/index.js';
+import { completeTypingRefresh, updateTypingStatus } from '../modules/typing/index.js';
 import { onShutdown } from '../response-registry.js';
 import type { Session } from '../types.js';
 import { removeSlackProcessingReaction } from './slack-processing-reaction.js';
@@ -241,7 +241,7 @@ registerDeliveryAction('stream_end', async (content, session, inDb) => {
   if (!routing || !active || !sameRouting(active.routing, routing)) return;
   const result = await closeActive(session.id);
   if (!result.handled) return;
-  pauseTypingRefreshAfterDelivery(session.id);
+  await completeTypingRefresh(session.id);
   void removeSlackProcessingReaction(inDb, routing.inReplyTo, active.instance).catch((err) => {
     log.warn('Slack processing reaction removal after stream end failed', { sessionId: session.id, err });
   });
