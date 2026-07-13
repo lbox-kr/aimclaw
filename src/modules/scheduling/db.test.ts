@@ -255,7 +255,7 @@ describe('updateTask', () => {
 });
 
 describe('insertRecurrence', () => {
-  it('copies series_id forward', () => {
+  it('copies series_id and origin routing forward', () => {
     const db = freshDb();
     insertBasicTask(db, 'task-orig', '0 9 * * *');
     db.prepare("UPDATE messages_in SET status = 'completed' WHERE id = 'task-orig'").run();
@@ -265,13 +265,26 @@ describe('insertRecurrence', () => {
       content: '{}',
       recurrence: '0 9 * * *',
       series_id: 'task-orig',
+      platform_id: 'slack:C1',
+      channel_type: 'slack',
+      thread_id: 'slack:C1:1712345678.000100',
     };
     insertRecurrence(db, msg, 'task-next', new Date().toISOString());
 
-    const row = db.prepare('SELECT series_id FROM messages_in WHERE id = ?').get('task-next') as {
+    const row = db
+      .prepare('SELECT series_id, platform_id, channel_type, thread_id FROM messages_in WHERE id = ?')
+      .get('task-next') as {
       series_id: string;
+      platform_id: string;
+      channel_type: string;
+      thread_id: string;
     };
-    expect(row.series_id).toBe('task-orig');
+    expect(row).toEqual({
+      series_id: 'task-orig',
+      platform_id: 'slack:C1',
+      channel_type: 'slack',
+      thread_id: 'slack:C1:1712345678.000100',
+    });
     db.close();
   });
 });

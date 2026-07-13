@@ -41,6 +41,15 @@ interface TaskRow {
   timestamp: string;
   tries: number;
   seq: number;
+  platform_id: string | null;
+  channel_type: string | null;
+  thread_id: string | null;
+}
+
+interface TaskOriginRouting {
+  platformId: string | null;
+  channelType: string | null;
+  threadId: string | null;
 }
 
 interface ScopedSession {
@@ -202,6 +211,29 @@ function withInbound<T>(session: ScopedSession, fn: (db: Database.Database) => T
   return withInboundDb(session.agent_group_id, session.id, fn);
 }
 
+function taskOriginRouting(originSessionId: string | null): TaskOriginRouting {
+  if (!originSessionId) return { platformId: null, channelType: null, threadId: null };
+  const origin = getSession(originSessionId);
+  if (!origin) return { platformId: null, channelType: null, threadId: null };
+
+  return (
+    withInbound(origin, (db) => {
+      const row = db
+        .prepare(
+          `SELECT platform_id, channel_type, thread_id
+             FROM messages_in
+            WHERE platform_id IS NOT NULL
+              AND channel_type IS NOT NULL
+              AND channel_type != 'agent'
+         ORDER BY seq DESC
+            LIMIT 1`,
+        )
+        .get() as { platform_id: string; channel_type: string; thread_id: string | null } | undefined;
+      return row ? { platformId: row.platform_id, channelType: row.channel_type, threadId: row.thread_id } : undefined;
+    }) ?? { platformId: null, channelType: null, threadId: null }
+  );
+}
+
 function parseContent(raw: string): { prompt: string; script: string | null; originSessionId: string | null } {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -252,7 +284,8 @@ function selectLiveTasks(db: Database.Database, status?: TaskStatus): TaskRow[] 
 function selectTask(db: Database.Database, id: string): TaskRow | undefined {
   return db
     .prepare(
-      `SELECT id AS row_id, series_id, status, process_after, recurrence, content, timestamp, tries, seq
+      `SELECT id AS row_id, series_id, status, process_after, recurrence, content, timestamp, tries, seq,
+              platform_id, channel_type, thread_id
          FROM messages_in
         WHERE kind = 'task'
           AND (id = ? OR series_id = ?)
@@ -280,6 +313,7 @@ function createTask(args: Record<string, unknown>, ctx: CallerContext) {
   const processAfter = firstRunIso(args.process_after, recurrence);
   const id = makeTaskId(args.name);
   const originSessionId = ctx.caller === 'agent' ? ctx.sessionId : null;
+  const originRouting = taskOriginRouting(originSessionId);
   // Each series runs in its own isolated session; point the fire at its own log.
   const { session } = resolveTaskSession(group, id);
   const promptWithLog =
@@ -298,6 +332,7 @@ function createTask(args: Record<string, unknown>, ctx: CallerContext) {
       processAfter,
       recurrence,
       content: JSON.stringify({ prompt: promptWithLog, script, originSessionId }),
+      ...originRouting,
     });
     return selectTask(db, id);
   });
@@ -520,6 +555,9 @@ function runTaskCommand(args: Record<string, unknown>, ctx: CallerContext) {
         processAfter: new Date().toISOString(),
         recurrence: null,
         content: row.content,
+        platformId: row.platform_id,
+        channelType: row.channel_type,
+        threadId: row.thread_id,
       });
       return { series_id: seriesKey, row_id: rowId, status: 'pending' };
     });

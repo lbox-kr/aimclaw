@@ -73,6 +73,37 @@ describe('send_message MCP tool — in_reply_to plumbing', () => {
     expect(out).toHaveLength(1);
     expect(out[0].in_reply_to).toBeNull();
   });
+
+  it('uses the task origin thread for an explicitly named channel', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-team', 'Slack team', 'channel', 'slack', 'slack:C1', NULL)`,
+      )
+      .run();
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in
+           (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+         VALUES (?, ?, 'task', ?, 'pending', ?, ?, ?, ?)`,
+      )
+      .run(
+        'task-1',
+        2,
+        new Date().toISOString(),
+        'slack:C1',
+        'slack',
+        'slack:C1:1712345678.000100',
+        JSON.stringify({ prompt: 'report' }),
+      );
+    publishInReplyTo('task-1');
+
+    await sendMessage.handler({ to: 'slack-team', text: 'done' });
+
+    const [out] = getUndeliveredMessages();
+    expect(out.thread_id).toBe('slack:C1:1712345678.000100');
+    expect(out.in_reply_to).toBe('task-1');
+  });
 });
 
 describe('set_status MCP tool', () => {

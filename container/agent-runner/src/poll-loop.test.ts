@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
-import { getUndeliveredMessages } from './db/messages-out.js';
+import { getUndeliveredMessages, writeMessageOut } from './db/messages-out.js';
 import { formatMessages, extractRouting } from './formatter.js';
 import { isCorruptionError, processQuery } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
@@ -435,6 +435,58 @@ describe('error result with no <message> envelope', () => {
     expect(getUndeliveredMessages()).toHaveLength(0);
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
+  });
+});
+
+describe('task result deduplication', () => {
+  function seedTaskSend(): void {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-main', 'Slack', 'channel', 'slack', 'slack:C1', NULL)`,
+      )
+      .run();
+    writeMessageOut({
+      id: 'mcp-send-1',
+      in_reply_to: 'task-1',
+      kind: 'chat',
+      platform_id: 'slack:C1',
+      channel_type: 'slack',
+      thread_id: 'slack:C1:1712345678.000100',
+      content: JSON.stringify({ text: '배포를 완료했어요.' }),
+    });
+  }
+
+  const taskRouting = {
+    platformId: 'slack:C1',
+    channelType: 'slack',
+    threadId: 'slack:C1:1712345678.000100',
+    inReplyTo: 'task-1',
+    taskFire: true,
+  };
+
+  it('does not nudge a bare final note after send_message already reported the result', async () => {
+    seedTaskSend();
+    const { query, pushes } = makeResultQuery({ type: 'result', text: '배포 완료 보고를 이미 전송했어요.' });
+
+    await processQuery(query, taskRouting, ['task-1'], 'claude', undefined, 'prompt', undefined);
+
+    expect(getUndeliveredMessages()).toHaveLength(1);
+    expect(pushes).toHaveLength(0);
+  });
+
+  it('drops a differently worded final message to the same destination', async () => {
+    seedTaskSend();
+    const { query } = makeResultQuery({
+      type: 'result',
+      text: '<message to="slack-main">배포 성공 보고를 마쳤어요.</message>',
+    });
+
+    await processQuery(query, taskRouting, ['task-1'], 'claude', undefined, 'prompt', undefined);
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('배포를 완료했어요.');
   });
 });
 

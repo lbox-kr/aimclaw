@@ -17,8 +17,9 @@ import { nextEvenSeq } from '../../db/session-db.js';
 /**
  * Insert one pending task occurrence. `seriesId` is the series join key — equal
  * to `id` for a brand-new series, or the existing series for a recurrence clone
- * or an on-demand run. Tasks never set platform/channel/thread (they fire into
- * an isolated system session), so those columns are always NULL.
+ * or an on-demand run. Tasks still fire in an isolated system session, but may
+ * carry their trusted origin routing so an explicit send can return to the
+ * thread that created the task.
  */
 export function insertTaskRow(
   db: Database.Database,
@@ -29,13 +30,19 @@ export function insertTaskRow(
     recurrence: string | null;
     content: string;
     status?: 'pending' | 'paused';
+    platformId?: string | null;
+    channelType?: string | null;
+    threadId?: string | null;
   },
 ): void {
   db.prepare(
     `INSERT INTO messages_in (id, seq, timestamp, status, tries, process_after, recurrence, kind, platform_id, channel_type, thread_id, content, series_id)
-     VALUES (@id, @seq, @timestamp, @status, 0, @processAfter, @recurrence, 'task', NULL, NULL, NULL, @content, @seriesId)`,
+     VALUES (@id, @seq, @timestamp, @status, 0, @processAfter, @recurrence, 'task', @platformId, @channelType, @threadId, @content, @seriesId)`,
   ).run({
     status: 'pending',
+    platformId: null,
+    channelType: null,
+    threadId: null,
     ...row,
     timestamp: new Date().toISOString(),
     seq: nextEvenSeq(db),
@@ -144,6 +151,9 @@ export interface RecurringMessage {
   content: string;
   recurrence: string;
   series_id: string;
+  platform_id?: string | null;
+  channel_type?: string | null;
+  thread_id?: string | null;
 }
 
 // Failed occurrences (script-skip:error runs) re-arm too — a broken monitor
@@ -193,6 +203,9 @@ export function insertRecurrence(
     recurrence: msg.recurrence,
     content: msg.content,
     status,
+    platformId: msg.platform_id,
+    channelType: msg.channel_type,
+    threadId: msg.thread_id,
   });
 }
 
