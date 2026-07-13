@@ -1,5 +1,5 @@
 {
-  "tools": ["WebSearch", "WebFetch"],
+  "tools": ["WebSearch", "WebFetch", "mcp__nanoclaw__read_current_thread"],
   "commands": [],
   "skills": {}
 }

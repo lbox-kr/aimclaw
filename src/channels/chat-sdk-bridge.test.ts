@@ -95,6 +95,37 @@ describe('createChatSdkBridge', () => {
     });
     expect(typeof bridge.subscribe).toBe('function');
   });
+
+  it('reads recent thread messages through the underlying adapter', async () => {
+    const fetchMessages = vi.fn(async () => ({
+      messages: [
+        {
+          id: 'm1',
+          author: { fullName: '정현수', userName: 'hyeonsu', userId: 'U1' },
+          text: '이 이슈를 간결하게 정리해줘',
+          metadata: { dateSent: new Date('2026-07-13T06:51:00.000Z') },
+        },
+      ],
+    }));
+    const bridge = createChatSdkBridge({
+      adapter: stubAdapter({ fetchMessages } as unknown as Partial<Adapter>),
+      supportsThreads: true,
+    });
+
+    await expect(bridge.fetchThreadMessages!('slack:C1:1783925519.861399', 50)).resolves.toEqual([
+      {
+        id: 'm1',
+        sender: '정현수',
+        senderId: 'U1',
+        text: '이 이슈를 간결하게 정리해줘',
+        timestamp: '2026-07-13T06:51:00.000Z',
+      },
+    ]);
+    expect(fetchMessages).toHaveBeenCalledWith('slack:C1:1783925519.861399', {
+      direction: 'backward',
+      limit: 50,
+    });
+  });
 });
 
 describe('createChatSdkBridge.deliver — reaction removal', () => {

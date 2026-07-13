@@ -27,7 +27,7 @@ import { SqliteStateAdapter } from '../state-sqlite.js';
 import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
-import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage } from './adapter.js';
+import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage, ThreadHistoryMessage } from './adapter.js';
 
 /** Adapter with optional gateway support (e.g., Discord). */
 interface GatewayAdapter extends Adapter {
@@ -575,6 +575,17 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     async setTyping(platformId: string, threadId: string | null) {
       const tid = threadId ?? platformId;
       await adapter.startTyping(tid);
+    },
+
+    async fetchThreadMessages(threadId: string, limit: number): Promise<ThreadHistoryMessage[]> {
+      const result = await adapter.fetchMessages(threadId, { direction: 'backward', limit });
+      return result.messages.map((message) => ({
+        id: message.id,
+        sender: message.author.fullName || message.author.userName || message.author.userId,
+        senderId: message.author.userId,
+        text: message.text,
+        timestamp: message.metadata.dateSent.toISOString(),
+      }));
     },
 
     async teardown() {
