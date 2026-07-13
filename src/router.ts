@@ -20,6 +20,7 @@
 import { getChannelAdapter, getChannelDefaults } from './channels/channel-registry.js';
 import { resolveThreadPolicy, resolveUnknownSenderPolicy } from './channels/channel-defaults.js';
 import { gateCommand } from './command-gate.js';
+import { enableSlackTypingThread, withAimClawSlackDefaults } from './custom/slack-typing.js';
 import { addSlackProcessingReaction } from './custom/slack-processing-reaction.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
@@ -187,6 +188,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   if (adapter && !adapter.supportsThreads) {
     event = { ...event, threadId: null };
   }
+  event = enableSlackTypingThread(event);
 
   const isMention = event.message.isMention === true;
 
@@ -313,7 +315,10 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   // defaults, hard-bounded by the live adapter's raw capability. Undeclared
   // adapters resolve through the behavior-faithful fallback, so a NULL-threads
   // wiring reproduces the historical supportsThreads-derived routing exactly.
-  const channelDefaults = getChannelDefaults(mg.instance ?? mg.channel_type, mg.channel_type);
+  const channelDefaults = withAimClawSlackDefaults(
+    event,
+    getChannelDefaults(mg.instance ?? mg.channel_type, mg.channel_type),
+  );
   const supportsThreads = adapter?.supportsThreads === true;
 
   let engagedCount = 0;
@@ -352,7 +357,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     if (engages && accessOk && scopeOk) {
       if (!processingAcknowledged) {
         processingAcknowledged = true;
-        void addSlackProcessingReaction(event).catch((err) => {
+        void addSlackProcessingReaction(event, effectiveThreadId).catch((err) => {
           log.warn('Slack processing reaction failed', { messagingGroupId: mg.id, err });
         });
       }

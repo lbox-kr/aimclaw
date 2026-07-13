@@ -1,9 +1,10 @@
 /**
- * Immediate Slack processing acknowledgement.
+ * Fallback Slack processing acknowledgement.
  *
- * This runs on the host as soon as routing confirms that an agent will handle
- * the request. It deliberately bypasses the model and container tool policy:
- * receipt acknowledgement is transport UX, not an agent judgment.
+ * Native Assistant typing is the primary signal. The hourglass is only used
+ * when the routed address has no valid Slack thread context. It deliberately
+ * bypasses the model and container tool policy: receipt acknowledgement is
+ * transport UX, not an agent judgment.
  */
 import type Database from 'better-sqlite3';
 
@@ -12,8 +13,18 @@ import type { InboundEvent } from '../channels/adapter.js';
 
 const PROCESSING_EMOJI = 'hourglass_flowing_sand';
 
-export async function addSlackProcessingReaction(event: InboundEvent): Promise<void> {
+export function hasSlackTypingThread(threadId: string | null): boolean {
+  if (!threadId) return false;
+  const parts = threadId.split(':');
+  return parts.length === 3 && parts[0] === 'slack' && Boolean(parts[1]) && Boolean(parts[2]);
+}
+
+export async function addSlackProcessingReaction(
+  event: InboundEvent,
+  typingThreadId: string | null = event.threadId,
+): Promise<void> {
   if (event.channelType !== 'slack' || !event.message.id) return;
+  if (hasSlackTypingThread(typingThreadId)) return;
 
   await getChannelAdapterExact(event.instance ?? event.channelType)?.deliver(event.platformId, event.threadId, {
     kind: 'chat',
@@ -38,6 +49,7 @@ export async function removeSlackProcessingReaction(
     | { channel_type: string | null; platform_id: string | null; thread_id: string | null; content: string }
     | undefined;
   if (row?.channel_type !== 'slack' || !row.platform_id) return;
+  if (hasSlackTypingThread(row.thread_id)) return;
 
   let messageId: unknown;
   try {
