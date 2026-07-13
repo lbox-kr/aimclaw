@@ -1,87 +1,26 @@
 ---
 name: self-customize
-description: Customize your own agent — add capabilities, install packages, add MCP servers, edit code or CLAUDE.md. Use when the user asks you to add a feature, install a tool, or modify how you work. For non-trivial code changes, delegate to a builder agent via create_agent.
+description: 기존 에이미 정체성을 유지하면서 패키지나 MCP 도구를 추가한다. 기능 추가나 도구 설치 요청에 사용한다.
 ---
 
-# Self-Customization
+# 기능 확장
 
-You can modify your own environment. Different kinds of changes have different workflows.
+에이미의 이름, AIM 소속과 서사는 기능 확장 대상이 아니다. 별도 이름, 성격이나 영구 메모리를 가진 에이전트를 만들지 않는다.
 
-## Decision Tree
+## 변경 경로
 
-**What needs to change?**
+- 일회성 작업은 현재 workspace에서 직접 처리한다.
+- 시스템 패키지나 전역 npm 패키지는 `install_packages`를 사용한다. 관리자 승인이 필요하고 승인 후 이미지 재빌드와 재시작이 진행된다.
+- 기존 MCP 서버 연결은 `add_mcp_server`를 사용한다. 관리자 승인 후 새 설정으로 재시작한다.
+- 소스 코드나 Dockerfile 변경은 런타임에서 우회하지 않는다. 변경 범위와 기대 결과를 정리해 저장소의 코딩 에이전트가 처리해야 한다고 안내한다.
+- 독립적인 검토가 필요하면 현재 작업 안에서 끝나는 일회성 `Task`만 사용한다.
 
-- **`CLAUDE.local.md` or files in your workspace** → Edit directly, no approval needed. Your workspace (`/workspace/agent/`) is persisted on the host. (Note: the composed `CLAUDE.md` itself is read-only and regenerated every spawn — write to `CLAUDE.local.md` instead.)
-- **System package (apt) or global npm package** → `install_packages`. Requires admin approval. On approval, image rebuild + container restart happen automatically.
-- **MCP server** → `add_mcp_server`. Requires admin approval. On approval, container restarts with the new server wired up (no rebuild — bun runs TS directly).
-- **Your source code or Dockerfile** → Delegate to a builder agent via `create_agent` (see below).
-- **A new specialist capability** → `create_agent` to spin up a dedicated agent for it.
+`CLAUDE.local.md`는 팀 공유 메모리이며 정체성, 개인 취향이나 사용자 소유 관계를 기록하는 곳이 아니다. 합성된 `CLAUDE.md`는 읽기 전용이므로 수정하지 않는다.
 
-## Workflow: Code Changes via Builder Agent
+## 적용 원칙
 
-For anything that requires editing source files (your own code, Dockerfile, etc.), **do not edit directly** — delegate to a builder agent. This gives the user a reviewable boundary and keeps your main session focused.
-
-1. Describe what you need changed in concrete terms (files, behavior, acceptance criteria)
-2. Call `create_agent({ name: "Builder", instructions: "<builder prompt>" })` — the returned agent group ID is your builder
-3. Call `send_to_agent({ agentGroupId, text: "<task description with specific files and changes>" })`
-4. The builder works in its own container, makes the changes, and reports back
-5. You review the builder's summary and confirm with the user. Source-code edits inside `/app/src` are picked up automatically on the next container start — no rebuild step needed (bun runs TS directly). If the builder also installed packages, its own `install_packages` approval will have rebuilt the image.
-
-### Builder Agent Instructions (use as CLAUDE.md when creating)
-
-```
-You are a builder agent. Your job is to make precise, minimal code changes to NanoClaw source files when the main agent requests it.
-
-## Rules
-
-- **Minimal scope.** Only change what was requested. Do not refactor surrounding code, "improve" unrelated files, or add features not asked for.
-- **Diff size limits.** Reject any change that exceeds 200 new lines or 150 modified lines in a single task. If the change is larger, push back and ask for it to be split into smaller tasks.
-- **Read before writing.** Always read the target file fully before editing. Understand the existing patterns.
-- **Test if possible.** If there are relevant tests, run them after your change.
-- **Report back.** When done, use send_to_agent to tell the requesting agent: (a) what files you changed, (b) a summary of the changes, (c) any follow-up needed (rebuild, tests, migrations).
-- **No silent failures.** If you can't complete the task, explain why — don't produce partial work without flagging it.
-
-## Safety
-
-- Never edit files outside the requested scope
-- Never commit or push anything
-- Never modify secrets, credentials, or .env files
-- If a change would break existing tests, stop and report
-```
-
-## Diff Size Limits — Why
-
-A 50-line focused change is reviewable. A 500-line sweep is not. Hard limits force the agent to decompose work into reviewable chunks, which:
-
-- Makes human approval meaningful (you can actually read 150 lines)
-- Catches runaway edits early (if the first task hits the limit, the scope was wrong)
-- Forces clear acceptance criteria per task
-
-The limits are **per builder task**, not per session. A 500-line feature is fine as 4 sequential builder tasks of ~125 lines each, each with its own scope.
-
-## Example: Adding a New MCP Tool to Yourself
-
-User: "Can you add a tool for reading RSS feeds?"
-
-1. Check [mcp.so](https://mcp.so) for an existing RSS MCP server
-2. If one exists → `add_mcp_server({ name: "rss", command: "npx", args: ["some-rss-mcp"] })` → admin approves → container restarts with the new server → done
-3. If nothing suitable exists → delegate to a builder agent:
-   - `create_agent({ name: "RSS Tool Builder", instructions: "<builder prompt from above>" })`
-   - `send_to_agent({ agentGroupId, text: "Add an MCP tool 'read_rss' to container/agent-runner/src/mcp-tools/. It should fetch an RSS URL and return the latest N items. Register it in mcp-tools/index.ts. Target: <200 new lines." })`
-   - Wait for builder's report — new tool code is picked up on the next container start (bun runs TS directly)
-
-## Example: Installing a System Tool
-
-User: "Can you transcribe audio?"
-
-1. Check what's available — `which ffmpeg` (likely not installed in base image)
-2. Decide approach: `@xenova/transformers` (npm, workspace-local) or `whisper.cpp` (apt + compile)
-3. For persistent system tool: `install_packages({ apt: ["ffmpeg"], npm: ["@xenova/transformers"], reason: "Audio transcription for voice messages" })`
-4. Wait for admin approval — on approve, the image is rebuilt and your container is restarted automatically
-5. Test the new capability once the container restarts
-
-## When NOT to Self-Customize
-
-- **The change is for a one-off task** — just do it in your workspace, don't modify the container
-- **The request is ambiguous** — ask the user what they actually need before spinning up builders or requesting installs
-- **You don't know if it will work** — prototype in your workspace first (`pnpm install` in `/workspace/agent/`), then promote to container-level install if it proves useful
+1. 먼저 내장 기능과 설치된 스킬로 해결 가능한지 확인한다.
+2. 새 의존성은 실제 요청에 필요한 최소 범위로 제한한다.
+3. credential 원문을 요청하거나 저장하지 않는다.
+4. 승인이 필요한 변경은 이유와 영향을 짧게 설명하고 승인 결과를 기다린다.
+5. 재시작으로 현재 대화가 끊길 수 있으면 영속 결과 전달 경로를 먼저 준비한다.

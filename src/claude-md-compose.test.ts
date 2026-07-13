@@ -14,7 +14,7 @@ vi.mock('./log.js', () => ({
   log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
 }));
 
-import { composeGroupClaudeMd } from './claude-md-compose.js';
+import { composeGroupClaudeMd, migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import {
   ensureContainerConfig,
   updateContainerConfigJson,
@@ -118,6 +118,35 @@ describe('composeGroupClaudeMd scheduling instructions (ncl tasks reach-in)', ()
     const imports = importsOf(ag.folder);
     expect(imports).not.toContain('@./.claude-fragments/module-scheduling.md');
     expect(imports).not.toContain('@./.claude-fragments/module-cli.md');
+  });
+});
+
+describe('AimClaw identity invariants', () => {
+  it('does not teach the runtime to create persistent agent identities', () => {
+    const ag = group('ag-single-identity', 'single-identity');
+    seed(ag);
+
+    composeGroupClaudeMd(ag);
+
+    expect(importsOf(ag.folder)).not.toContain('@./.claude-fragments/module-agents.md');
+  });
+
+  it.each([
+    'When the user first reaches out, introduce yourself briefly and invite them to chat. Keep replies concise.',
+    'When the user first reaches out (or you receive a system welcome prompt), introduce yourself briefly and invite them to chat. Keep replies concise.',
+  ])('removes the retired personal-agent seed while preserving team memory', (welcome) => {
+    const dir = path.join(GROUPS_DIR, 'legacy-personal-seed');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'CLAUDE.local.md'),
+      `# 에이미\n\nYou are 에이미, a personal NanoClaw agent for 정현수. ${welcome}\n\n## 팀 메모리\n\n- AIM 주간 회의는 월요일이다.\n`,
+    );
+
+    migrateGroupsToClaudeLocal();
+
+    expect(fs.readFileSync(path.join(dir, 'CLAUDE.local.md'), 'utf-8')).toBe(
+      '## 팀 메모리\n\n- AIM 주간 회의는 월요일이다.\n',
+    );
   });
 });
 
