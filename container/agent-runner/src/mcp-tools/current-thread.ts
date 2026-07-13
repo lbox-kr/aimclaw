@@ -70,7 +70,7 @@ export const readCurrentThread: McpToolDefinition = {
   tool: {
     name: 'read_current_thread',
     description:
-      '현재 Slack 대화에서 앞선 메시지가 꼭 필요할 때만 현재 thread를 읽습니다. 사용자가 “이 이슈”, “위 내용”, “스레드”처럼 현재 입력만으로 대상을 알 수 없게 가리킬 때 호출하세요. 요청 자체에 충분한 맥락이 있으면 호출하지 마세요. 다른 채널이나 thread는 조회할 수 없습니다.',
+      '현재 Slack 대화에서 앞선 메시지가 꼭 필요할 때만 현재 thread를 읽습니다. 사용자가 “이 이슈”, “위 내용”, “스레드”처럼 현재 입력만으로 대상을 알 수 없게 가리키거나, 자기 자신을 향한 mention 외에 요청 본문이 없으면 답하거나 되묻기 전에 반드시 호출하세요. mention-only 호출에서는 가장 가까운 앞선 사용자 질문이나 요청을 찾아 이어서 처리하고, 조회해도 요청을 특정할 수 없을 때만 물어보세요. 요청 자체에 충분한 맥락이 있으면 호출하지 마세요. 다른 채널이나 thread는 조회할 수 없습니다.',
     inputSchema: {
       type: 'object' as const,
       properties: {
