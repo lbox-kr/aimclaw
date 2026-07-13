@@ -2,16 +2,26 @@
  * AimClaw Slack user authorization.
  *
  * The central NanoClaw role tables remain the only authority source. This
- * module resolves a fresh execution policy for every routed request and
- * handles administrator changes before a message can reach the LLM.
+ * module auto-connects new Slack channels, resolves a fresh execution policy
+ * for every routed request, and handles administrator changes before a
+ * message can reach the LLM.
  */
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 import type { InboundEvent } from '../channels/adapter.js';
+import { resolveUnknownSenderPolicy, resolveWiringDefaults } from '../channels/channel-defaults.js';
+import { getAllAgentGroups } from '../db/agent-groups.js';
 import { getDb } from '../db/connection.js';
+import {
+  createMessagingGroup,
+  createMessagingGroupAgent,
+  getMessagingGroupWithAgentCount,
+} from '../db/messaging-groups.js';
 import { getDeliveryAdapter } from '../delivery.js';
+import { log } from '../log.js';
 import { addMember } from '../modules/permissions/db/agent-group-members.js';
+import { deletePendingChannelApproval } from '../modules/permissions/db/pending-channel-approvals.js';
 import { upsertUser } from '../modules/permissions/db/users.js';
 import { isGlobalAdmin, isOwner } from '../modules/permissions/db/user-roles.js';
 import { registerMessageInterceptor, setRequestPolicyResolver } from '../router.js';
@@ -163,6 +173,52 @@ export function changeAdministrator(
 }
 
 registerMessageInterceptor(async (event) => {
+  if (event.channelType === 'slack' && event.message.isGroup === true && event.message.isMention === true) {
+    const instance = event.instance ?? event.channelType;
+    const found = getMessagingGroupWithAgentCount(event.channelType, event.platformId, instance);
+    const agentGroups = found?.agentCount || found?.mg.denied_at ? [] : getAllAgentGroups();
+
+    if (agentGroups.length === 1) {
+      const agentGroup = agentGroups[0];
+      const now = new Date().toISOString();
+      const messagingGroupId = found?.mg.id ?? `mg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const engage = resolveWiringDefaults(instance, true, agentGroup.name, event.channelType);
+
+      if (!found) {
+        createMessagingGroup({
+          id: messagingGroupId,
+          channel_type: event.channelType,
+          platform_id: event.platformId,
+          instance,
+          name: null,
+          is_group: 1,
+          unknown_sender_policy: resolveUnknownSenderPolicy(instance, true, event.channelType),
+          denied_at: null,
+          created_at: now,
+        });
+      }
+
+      createMessagingGroupAgent({
+        id: `mga-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        messaging_group_id: messagingGroupId,
+        agent_group_id: agentGroup.id,
+        engage_mode: engage.engage_mode,
+        engage_pattern: engage.engage_pattern,
+        sender_scope: 'known',
+        ignored_message_policy: 'accumulate',
+        session_mode: 'shared',
+        priority: 0,
+        created_at: now,
+      });
+      deletePendingChannelApproval(messagingGroupId);
+      log.info('Slack channel automatically connected to sole agent', {
+        messagingGroupId,
+        agentGroupId: agentGroup.id,
+        platformId: event.platformId,
+      });
+    }
+  }
+
   const command = parseAdministratorCommand(event);
   if (!command) return false;
 
