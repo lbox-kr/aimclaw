@@ -12,6 +12,14 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+const reactionMocks = vi.hoisted(() => ({
+  removeSlackProcessingReaction: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('./custom/slack-processing-reaction.js', () => ({
+  removeSlackProcessingReaction: reactionMocks.removeSlackProcessingReaction,
+}));
+
 vi.mock('./container-runner.js', () => ({
   wakeContainer: vi.fn().mockResolvedValue(undefined),
   isContainerRunning: vi.fn().mockReturnValue(false),
@@ -71,6 +79,7 @@ function insertOutbound(agentGroupId: string, sessionId: string, msgId: string):
 }
 
 beforeEach(() => {
+  reactionMocks.removeSlackProcessingReaction.mockClear();
   if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
   fs.mkdirSync(TEST_DIR, { recursive: true });
   const db = initTestDb();
@@ -255,8 +264,8 @@ describe('deliverSessionMessages — instance resolution', () => {
     const { session } = resolveSession('ag-1', 'mg-tester', null, 'shared');
     const db = new Database(outboundDbPath('ag-1', session.id));
     db.prepare(
-      `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
-       VALUES ('out-inst', datetime('now'), 'chat', 'slack:C1', 'slack', ?)`,
+      `INSERT INTO messages_out (id, in_reply_to, timestamp, kind, platform_id, channel_type, content)
+       VALUES ('out-inst', 'in-1', datetime('now'), 'chat', 'slack:C1', 'slack', ?)`,
     ).run(JSON.stringify({ text: 'hi' }));
     db.close();
 
@@ -270,6 +279,7 @@ describe('deliverSessionMessages — instance resolution', () => {
 
     await deliverSessionMessages(session);
     expect(instances).toEqual(['alpha-tester']);
+    expect(reactionMocks.removeSlackProcessingReaction).toHaveBeenCalledWith(expect.anything(), 'in-1', 'alpha-tester');
   });
 
   it('default session passes the backfilled default instance (= channel_type)', async () => {
