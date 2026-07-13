@@ -14,7 +14,7 @@ vi.mock('../../config.js', async () => {
   return { ...actual, DATA_DIR: '/tmp/nanoclaw-test-typing' };
 });
 
-import { setTypingAdapter, startTypingRefresh, stopTypingRefresh, updateTypingStatus } from './index.js';
+import { completeTypingRefresh, setTypingAdapter, startTypingRefresh, updateTypingStatus } from './index.js';
 
 type Call = { channelType: string; platformId: string; threadId: string | null; instance?: string; status?: string };
 
@@ -24,6 +24,9 @@ function captureAdapter() {
     async setTyping(channelType, platformId, threadId, instance, status) {
       calls.push({ channelType, platformId, threadId, instance, status });
     },
+    async clearTyping(channelType, platformId, threadId, instance) {
+      calls.push({ channelType, platformId, threadId, instance, status: '' });
+    },
   });
   return calls;
 }
@@ -32,8 +35,8 @@ beforeEach(() => {
   vi.useFakeTimers();
 });
 
-afterEach(() => {
-  stopTypingRefresh('sess-1');
+afterEach(async () => {
+  await completeTypingRefresh('sess-1');
   vi.useRealTimers();
 });
 
@@ -139,5 +142,35 @@ describe('startTypingRefresh — instance forwarding', () => {
     await vi.advanceTimersByTimeAsync(4_500);
     expect(calls.length).toBeGreaterThanOrEqual(1);
     expect(calls[calls.length - 1].status).toBe('Jira에서 할 일을 조회하는 중이에요');
+  });
+
+  it('serializes terminal clear after an in-flight status and never refreshes again', async () => {
+    const events: string[] = [];
+    let releaseStatus!: () => void;
+    const statusBlocked = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    setTypingAdapter({
+      async setTyping() {
+        events.push('status:start');
+        await statusBlocked;
+        events.push('status:end');
+      },
+      async clearTyping() {
+        events.push('clear');
+      },
+    });
+
+    startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', 'T1', 'slack');
+    await vi.advanceTimersByTimeAsync(0);
+    const completion = completeTypingRefresh('sess-1');
+    expect(events).toEqual(['status:start']);
+
+    releaseStatus();
+    await completion;
+    expect(events).toEqual(['status:start', 'status:end', 'clear']);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(events).toEqual(['status:start', 'status:end', 'clear']);
   });
 });

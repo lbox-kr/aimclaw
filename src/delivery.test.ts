@@ -45,6 +45,7 @@ import {
 import { getDeliveredIds } from './db/session-db.js';
 import { resolveSession, outboundDbPath, openInboundDb } from './session-manager.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
+import { startTypingRefresh } from './modules/typing/index.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -69,12 +70,17 @@ function seedAgentAndChannel(): void {
   });
 }
 
-function insertOutbound(agentGroupId: string, sessionId: string, msgId: string): void {
+function insertOutbound(
+  agentGroupId: string,
+  sessionId: string,
+  msgId: string,
+  content: Record<string, unknown> = { text: 'hello' },
+): void {
   const db = new Database(outboundDbPath(agentGroupId, sessionId));
   db.prepare(
     `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
      VALUES (?, datetime('now'), 'chat', 'telegram:123', 'telegram', ?)`,
-  ).run(msgId, JSON.stringify({ text: 'hello' }));
+  ).run(msgId, JSON.stringify(content));
   db.close();
 }
 
@@ -161,6 +167,32 @@ describe('deliverSessionMessages — concurrent invocations', () => {
     await deliverSessionMessages(session);
 
     expect(callCount).toBe(1);
+  });
+});
+
+describe('deliverSessionMessages — terminal typing lifecycle', () => {
+  it('clears the native status after a provider-final message', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    insertOutbound('ag-1', session.id, 'out-final', { text: 'done', _nanoclawFinal: true });
+
+    const statusCalls: string[] = [];
+    setDeliveryAdapter({
+      async deliver() {
+        return 'plat-final';
+      },
+      async setTyping() {
+        statusCalls.push('set');
+      },
+      async clearTyping() {
+        statusCalls.push('clear');
+      },
+    });
+    startTypingRefresh(session.id, 'ag-1', 'telegram', 'telegram:123', null, 'telegram');
+
+    await deliverSessionMessages(session);
+
+    expect(statusCalls).toEqual(['set', 'clear']);
   });
 });
 

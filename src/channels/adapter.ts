@@ -229,6 +229,9 @@ export interface ChannelAdapter {
   /** Show the platform's native working indicator. Platforms with richer
    * agent UI (Slack) may render `status` as short progress text. */
   setTyping?(platformId: string, threadId: string | null, status?: string): Promise<void>;
+  /** Explicitly clear a native working indicator after terminal delivery.
+   * Platforms whose indicator expires on its own can omit this. */
+  clearTyping?(platformId: string, threadId: string | null): Promise<void>;
   /** Stream structured progress and the final answer into one native message. */
   stream?(
     platformId: string,
