@@ -65,12 +65,14 @@ describe('setup carries the picked provider to creation via a setup-run env var'
   }
 });
 
-describe('AimClaw keeps one team identity', () => {
-  it('defines 에이미 and AIM in the tracked runtime contract', () => {
+describe('AimClaw keeps one team identity and voice', () => {
+  it('defines 에이미, AIM, and the default honorific style in the tracked runtime contract', () => {
     const contract = read('container/CLAUDE.md');
     const identity = contract.split('## Workspace and memory')[0];
     expect(contract).toContain('# 에이미');
     expect(contract).toContain('LBox AIM 스쿼드');
+    expect(contract).toContain('기본 높임법은 친근한 해요체다');
+    expect(contract).toContain('반말 허용으로 추정하지 않는다');
     expect(contract).not.toContain('NanoClaw');
     expect(identity).not.toContain('개인 봇');
     expect(identity).not.toContain('전용 에이전트');
@@ -82,6 +84,11 @@ describe('AimClaw keeps one team identity', () => {
     const welcome = read('container/skills/welcome/SKILL.md');
     expect(welcome).toContain('명시적인 환영 요청을 받았을 때만 사용한다');
     expect(welcome).toContain('질문이나 작업을 이미 요청했다면 환영 절차를 실행하지 않고');
+  });
+
+  it('keeps Slack conversation matching subordinate to the shared honorific rule', () => {
+    const skill = read('container/skills/slack-formatting/SKILL.md');
+    expect(skill).toContain('공통 높임법 규칙을 유지하면서');
   });
 
   for (const file of ['scripts/init-first-agent.ts', 'scripts/init-cli-agent.ts']) {
