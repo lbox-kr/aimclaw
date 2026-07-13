@@ -21,7 +21,7 @@ TRIGGER_TMP="$DEPLOY_DIR/.trigger.$$.tmp"
 trap 'rm -f "$TRIGGER_TMP"' EXIT
 
 TASK_PROMPT=$(cat <<EOF
-AimClaw 배포 결과를 사용자에게 알리는 one-shot 작업이다.
+AimClaw 배포가 현재 대화보다 오래 지속되거나 실행 환경을 중단해도 결과를 사용자에게 알리는 영속 one-shot 작업이다.
 
 요청 ID: $REQUEST_ID
 결과 목적지: $DESTINATION

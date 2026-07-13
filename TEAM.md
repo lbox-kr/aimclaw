@@ -14,8 +14,28 @@ LBox 팀 공용 Slack 에이전트의 설치, 배포, 갱신과 복구 방법을
 
 ## 모델 위임
 
-Claude provider는 기본적으로 Sonnet을 사용하고, 판단이 필요한 작업은 최대 effort의
-일회성 Opus Task에 위임한다. 명시적인 그룹별 model 설정은 이 기본값보다 우선한다.
+Claude provider는 기본적으로 Sonnet을 사용한다. 모호하고 고위험인 판단,
+아키텍처·보안 결정, 충돌하는 근거 해석, 반복해 실패한 문제는 사용 가능한 경우 최대
+effort의 일회성 Opus Task에 위임한다. 명시적인 그룹별 model 설정은 이 기본값보다
+우선한다.
+
+## 운영 에이전트
+
+AimClaw의 운영 에이전트는 에이미 하나다. 정체성 원문은
+`templates/aimclaw/aimy/context/instructions.md`에서 관리한다. 공통
+`container/CLAUDE.md`는 안전·정확성·가독성 규칙만 제공하고, 에이미 원문은 운영
+그룹의 `instructions.prepend.md`에 복사되어 시스템 프롬프트의 첫 fragment로 합성된다.
+
+설치하거나 정체성 원문을 변경한 뒤에는 운영 그룹에 다시 반영하고 재시작한다.
+
+```bash
+./bin/ncl groups list
+cp templates/aimclaw/aimy/context/instructions.md groups/<folder>/instructions.prepend.md
+cmp templates/aimclaw/aimy/context/instructions.md groups/<folder>/instructions.prepend.md
+./bin/ncl groups restart --id <id>
+```
+
+마지막으로 실제 Slack 응답에서 정체성이 적용되었는지 확인한다.
 
 ## 사용자와 권한
 
@@ -59,6 +79,19 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
 에이전트의 DM 세션과 대화 문맥은 하나로 유지한다. 유효한 thread가 없는 경우에만
 `hourglass_flowing_sand` reaction을 사용하고 첫 응답 후 제거한다.
 
+### 중단 가능 작업
+
+현재 대화를 넘어가거나 컨테이너·호스트를 중단할 수 있는 작업은 중단 동작보다 먼저
+결과 전달을 영속 작업으로 예약한다. 예약에는 Slack destination, 고유 요청 ID와
+재개 후 확인할 수 있는 상태 또는 결과 원본을 포함한다. 결과 작업은 같은 요청 ID의
+완료나 실패만 한 번 전달한다.
+
+컨테이너 재시작 뒤 같은 작업을 이어야 하면 `ncl groups restart --message`의 on-wake
+흐름을 사용한다. 서비스 재시작, 호스트 재시작이나 외부 비동기 작업처럼 별도 결과를
+확인해야 하면 세션 DB에 남는 one-shot task를 사용한다. `set_status`는 현재 Slack
+대화의 작업 표시일 뿐 이 연속성을 대신하지 않는다. 영속 전달 수단이 없으면 끊긴 뒤
+결과를 알려주겠다고 약속하지 않고 다시 확인할 방법을 먼저 안내한다.
+
 ### 일반 사용자 화이트리스트
 
 `container/skills/team-user-access/allowlist.json`에서 관리한다.
@@ -95,8 +128,12 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
    - Slack Bot User OAuth Token (`xoxb-…`)
    - Slack App-Level Token (`xapp-…`, `connections:write`)
    - 운영자의 Slack member ID
-   - 에이전트 이름과 필요한 provider 인증 정보
+   - 필요한 provider 인증 정보
+
+   운영 에이전트 이름은 에이미를 사용한다.
 3. 코딩 에이전트가 `.env` 작성, `bash nanoclaw.sh`, Slack wiring과 응답 확인을 진행한다.
+   위 [운영 에이전트](#운영-에이전트) 원문을 생성된 그룹의
+   `instructions.prepend.md`에 반영한다.
 4. GitHub 개인 계정 연결을 완료한 뒤 호스트 저장소 동기화를 설치하고, 읽기 전용 작업공간을 에이전트 그룹에 연결한다.
 
    ```bash
@@ -134,9 +171,9 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
 ~/nanoclaw-deploy/deployed-sha
 ```
 
-Slack에서 시작한 즉시 배포는 요청 ID가 일치하는 결과 알림 작업을 먼저 예약한다.
-코드 변경으로 서비스가 재시작되어도 이 작업은 세션 DB에 남아 새 프로세스에서 결과를
-확인하고 같은 Slack destination에 완료 또는 실패를 알린다.
+즉시 배포는 위 중단 가능 작업 계약을 `request_id`와 `status.json`으로 구현한다. 배포
+모드와 서비스 재시작 여부에 관계없이 결과 알림 작업을 먼저 예약하고, 같은 요청 ID의
+완료 또는 실패를 원래 Slack destination에 한 번 알린다.
 
 `status.json`의 `state`가 `failed`면 기존 프로세스는 계속 실행된다. 실패 원인을
 수정하거나 문제 커밋을 revert하면 다음 자동 배포에서 다시 시도한다.

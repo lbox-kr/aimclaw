@@ -14,7 +14,7 @@
 - **Companions** — a long-running presence that accumulates context over time: a `Researcher` tracking an ongoing inquiry, a `Calendar` agent managing scheduling, an assistant that knows your preferences and history.
 - **Collaborators** — a parallel specialist that works independently and reports back: a `Builder` handling code edits while you stay in conversation, a `Reviewer` running checks in the background.
 
-The right frame is: does this agent need its own memory and context that builds over time, or does it need to work independently without blocking your turn? Either is a good reason to spawn one.
+Create one only when the user explicitly asks for a long-lived agent, or the work genuinely needs its own memory and context to build over time while operating independently. Parallelism alone is not enough when a one-shot SDK `Agent` task can finish the work.
 
 ### When NOT to use
 
