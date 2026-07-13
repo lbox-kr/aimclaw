@@ -22,17 +22,15 @@ effort의 일회성 Opus Task에 위임한다. 명시적인 그룹별 model 설�
 ## 운영 에이전트
 
 AimClaw의 운영 에이전트는 에이미 하나다. 정체성 원문은
-`templates/aimclaw/aimy/context/instructions.md`에서 관리한다. 공통
-`container/CLAUDE.md`는 안전·정확성·가독성 규칙만 제공하고, 에이미 원문은 운영
-그룹의 `instructions.prepend.md`에 복사되어 시스템 프롬프트의 첫 fragment로 합성된다.
+`container/CLAUDE.md`에서 관리한다. 이름, LBox AIM 스쿼드 소속과 서사는 모든
+채널에서 동일하며, 그룹 메모리나 사용자에 따라 달라지지 않는다.
 
-설치하거나 정체성 원문을 변경한 뒤에는 운영 그룹에 다시 반영하고 재시작한다.
+`CLAUDE.local.md`는 팀 공유 메모리일 뿐 정체성 원천이 아니다. 이름, 소속, 개인 전용
+관계나 별도 페르소나를 기록하지 않는다. 정체성 원문 변경은 자동 배포에서 서비스
+재시작 대상으로 처리한다.
 
 ```bash
-./bin/ncl groups list
-cp templates/aimclaw/aimy/context/instructions.md groups/<folder>/instructions.prepend.md
-cmp templates/aimclaw/aimy/context/instructions.md groups/<folder>/instructions.prepend.md
-./bin/ncl groups restart --id <id>
+rg -n '^# 에이미|LBox AIM 스쿼드' container/CLAUDE.md
 ```
 
 마지막으로 실제 Slack 응답에서 정체성이 적용되었는지 확인한다.
@@ -131,9 +129,10 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
    - 필요한 provider 인증 정보
 
    운영 에이전트 이름은 에이미를 사용한다.
+
 3. 코딩 에이전트가 `.env` 작성, `bash nanoclaw.sh`, Slack wiring과 응답 확인을 진행한다.
-   위 [운영 에이전트](#운영-에이전트) 원문을 생성된 그룹의
-   `instructions.prepend.md`에 반영한다.
+   초기 그룹 메모리에 사용자 전용 봇이나 NanoClaw 정체성이 생성되지 않았는지
+   확인한다.
 4. GitHub 개인 계정 연결을 완료한 뒤 호스트 저장소 동기화를 설치하고, 읽기 전용 작업공간을 에이전트 그룹에 연결한다.
 
    ```bash

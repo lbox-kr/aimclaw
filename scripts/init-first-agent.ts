@@ -31,7 +31,6 @@
  * For direct-addressable channels (telegram, whatsapp, etc.), --platform-id
  * is typically the same as the handle in --user-id, with the channel prefix.
  */
-import fs from 'fs';
 import net from 'net';
 import path from 'path';
 
@@ -45,7 +44,7 @@ import {
   resolveWiringDefaults,
 } from '../src/channels/channel-defaults.js';
 import { hasDeclaredChannelDefaults } from '../src/channels/channel-registry.js';
-import { DATA_DIR, GROUPS_DIR } from '../src/config.js';
+import { DATA_DIR } from '../src/config.js';
 import { createAgentGroup, getAgentGroupByFolder } from '../src/db/agent-groups.js';
 import { initDb } from '../src/db/connection.js';
 import {
@@ -244,23 +243,13 @@ async function main(): Promise<void> {
     console.log(`Reusing agent group: ${ag.id} (${folder})`);
   }
   // Ensure the config row exists; defer workspace scaffolding to the first
-  // spawn (group-init), where the DB-resolved provider decides the surface
-  // (Claude: CLAUDE.local.md; a surfaces-owning provider: the memory scaffold)
-  // — so a non-Claude group never gets stale CLAUDE.* files written here.
+  // spawn. Identity comes from the shared AimClaw runtime contract, never
+  // from user-specific group memory.
   ensureContainerConfig(ag.id);
   // Runtime provider lives on the config row, not the deprecated agent_provider.
   if (pickedProvider && pickedProvider !== 'claude') {
     updateContainerConfigScalars(ag.id, { provider: pickedProvider });
   }
-  const groupDir = path.resolve(GROUPS_DIR, folder);
-  fs.mkdirSync(groupDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(groupDir, '.seed.md'),
-    `# ${args.agentName}\n\n` +
-      `You are ${args.agentName}, a personal NanoClaw agent for ${args.displayName}. ` +
-      'When the user first reaches out (or you receive a system welcome prompt), introduce yourself briefly and invite them to chat. Keep replies concise.\n',
-  );
-
   // 2b. Assign the user a role for this agent group. The caller picks via
   // --role; the channel drivers default to 'owner' for the self-host case.
   //  - owner:  global owner (agent_group_id=null). Cross-channel access.

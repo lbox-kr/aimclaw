@@ -65,6 +65,21 @@ describe('setup carries the picked provider to creation via a setup-run env var'
   }
 });
 
+describe('AimClaw keeps one team identity', () => {
+  it('defines 에이미 and AIM in the tracked runtime contract', () => {
+    const contract = read('container/CLAUDE.md');
+    expect(contract).toContain('# 에이미');
+    expect(contract).toContain('LBox AIM 스쿼드');
+    expect(contract).not.toContain('NanoClaw');
+  });
+
+  for (const file of ['scripts/init-first-agent.ts', 'scripts/init-cli-agent.ts']) {
+    it(`${file} does not seed a personal NanoClaw identity`, () => {
+      expect(read(file)).not.toContain('personal NanoClaw agent');
+    });
+  }
+});
+
 describe('codex installs from a hard-wired self-contained script', () => {
   // The provider picker no longer enumerates a remote manifest branch (an
   // unaudited control surface). Codex is offered in trunk and installed by its

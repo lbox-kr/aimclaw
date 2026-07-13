@@ -39,6 +39,9 @@ const MCP_TOOLS_HOST_SUBPATH = path.join('container', 'agent-runner', 'src', 'mc
 
 const COMPOSED_HEADER = '<!-- Composed at spawn — do not edit. Edit CLAUDE.local.md for per-group content. -->';
 
+const LEGACY_PERSONAL_AGENT_SEED =
+  /^# [^\r\n]+\r?\n\r?\nYou are [^\r\n]+, a personal NanoClaw agent for [^\r\n]+\. When the user first reaches out(?: \(or you receive a system welcome prompt\))?, introduce yourself briefly and invite them to chat\. Keep replies concise\.\r?\n*/;
+
 /**
  * Regenerate `groups/<folder>/CLAUDE.md` from the shared base, enabled skill
  * fragments, and MCP server fragments declared in `container.json`. Creates
@@ -95,6 +98,10 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
       const match = entry.match(/^(.+)\.instructions\.md$/);
       if (!match) continue;
       const moduleName = match[1];
+      // AimClaw has one persistent identity: 에이미. Keep the upstream
+      // create_agent implementation dormant instead of teaching the runtime
+      // to create separately named, long-lived personas.
+      if (moduleName === 'agents') continue;
       if ((moduleName === 'cli' || moduleName === 'scheduling') && cliDisabled) continue;
       desired.set(`module-${moduleName}.md`, {
         type: 'symlink',
@@ -157,7 +164,8 @@ export function composeGroupClaudeMd(group: AgentGroup): void {
 
 /**
  * One-time cutover from the `groups/global/CLAUDE.md` + `.claude-global.md`
- * pattern. Idempotent — safe to run on every host startup.
+ * pattern plus cleanup of the retired personal-agent bootstrap. Idempotent —
+ * safe to run on every host startup.
  *
  * For each group dir:
  *   - remove `.claude-global.md` symlink if present
@@ -194,6 +202,15 @@ export function migrateGroupsToClaudeLocal(): void {
     if (fs.existsSync(claudeMd) && !fs.existsSync(claudeLocal)) {
       fs.renameSync(claudeMd, claudeLocal);
       actions.push(`${entry.name}/CLAUDE.md → CLAUDE.local.md`);
+    }
+
+    if (fs.existsSync(claudeLocal)) {
+      const current = fs.readFileSync(claudeLocal, 'utf-8');
+      const cleaned = current.replace(LEGACY_PERSONAL_AGENT_SEED, '');
+      if (cleaned !== current) {
+        writeAtomic(claudeLocal, cleaned);
+        actions.push(`${entry.name}/CLAUDE.local.md personal-agent seed removed`);
+      }
     }
   }
 

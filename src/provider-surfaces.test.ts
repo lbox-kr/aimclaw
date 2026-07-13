@@ -67,8 +67,28 @@ describe('initGroupFilesystem agent surfaces', () => {
     const groupDir = path.join(GROUPS_DIR, ag.folder);
     const claudeDir = path.join(DATA_DIR, 'v2-sessions', ag.id, '.claude-shared');
     expect(fs.readFileSync(path.join(groupDir, 'CLAUDE.local.md'), 'utf-8')).toBe('hello\n');
-    expect(fs.existsSync(path.join(claudeDir, 'settings.json'))).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(path.join(claudeDir, 'settings.json'), 'utf-8'));
+    expect(settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('0');
+    expect(settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1');
     expect(fs.existsSync(path.join(claudeDir, 'skills'))).toBe(true);
+  });
+
+  it('converges existing Claude settings on single-identity defaults', () => {
+    const ag = group('ag-existing-settings', 'existing-settings');
+    createAgentGroup(ag);
+    initGroupFilesystem(ag);
+
+    const settingsFile = path.join(DATA_DIR, 'v2-sessions', ag.id, '.claude-shared', 'settings.json');
+    const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1';
+    settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '0';
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+
+    initGroupFilesystem(ag);
+
+    const migrated = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    expect(migrated.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBe('0');
+    expect(migrated.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1');
   });
 
   it('writes the seed into the memory scaffold — never CLAUDE.* — for a provider with its own surfaces', () => {

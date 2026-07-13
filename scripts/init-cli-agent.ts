@@ -2,7 +2,7 @@
  * Initialize the scratch CLI agent used during `/new-setup`.
  *
  * Creates the synthetic `cli:local` user, grants owner role if no owner
- * exists yet, builds an agent group with a minimal CLAUDE.md, and wires it
+ * exists yet, builds an agent group with empty shared memory, and wires it
  * to the CLI messaging group so `pnpm run chat` works immediately.
  *
  * No welcome is staged — the operator's first `pnpm run chat` is the
@@ -127,12 +127,7 @@ async function main(): Promise<void> {
   } else {
     console.log(`Reusing agent group: ${ag.id} (${folder})`);
   }
-  initGroupFilesystem(ag, {
-    instructions:
-      `# ${args.agentName}\n\n` +
-      `You are ${args.agentName}, a personal NanoClaw agent for ${args.displayName}. ` +
-      'When the user first reaches out, introduce yourself briefly and invite them to chat. Keep replies concise.',
-  });
+  initGroupFilesystem(ag);
   // Runtime provider lives on the config row, not the deprecated agent_provider.
   if (pickedProvider && pickedProvider !== 'claude') {
     updateContainerConfigScalars(ag.id, { provider: pickedProvider });

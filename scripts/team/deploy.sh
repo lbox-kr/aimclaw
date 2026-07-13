@@ -142,7 +142,9 @@ fi
 # the next container spawn — no build, no restart.
 is_harness_path() {
   case "$1" in
-    container/CLAUDE.md) return 0 ;;
+    # The tracked identity contract must restart the service so every active
+    # session reloads it; treat it as code, not deferred harness content.
+    container/CLAUDE.md) return 1 ;;
     container/skills/*) return 0 ;;
     templates/*) return 0 ;;
     .claude/*) return 0 ;;

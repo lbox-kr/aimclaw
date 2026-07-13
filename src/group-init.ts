@@ -11,9 +11,9 @@ const DEFAULT_SETTINGS_JSON =
   JSON.stringify(
     {
       env: {
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '0',
         CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
       },
       hooks: {
         PreCompact: [
@@ -74,9 +74,10 @@ export function initGroupFilesystem(
   // preserves pre-existing files, and the doctrine tells the agent to read
   // that file on its first turn.
   //
-  // Creation stays provider-agnostic: a DM-agent creator drops the seed in a
-  // neutral `.seed.md`, and placement is deferred to here (the first spawn,
-  // where the DB-resolved provider is known). Once placed it's consumed.
+  // Provider-neutral creation paths may drop a seed in a neutral `.seed.md`;
+  // placement is deferred to the first spawn, where the DB-resolved provider
+  // is known. AimClaw's primary setup intentionally leaves this empty because
+  // identity belongs to the tracked shared contract, not group memory.
   // `opts.instructions` still wins for any caller that passes it inline.
   const neutralSeedFile = path.join(groupDir, '.seed.md');
   const seed =
@@ -123,7 +124,7 @@ export function initGroupFilesystem(
       fs.writeFileSync(settingsFile, DEFAULT_SETTINGS_JSON);
       initialized.push('settings.json');
     } else {
-      ensurePreCompactHook(settingsFile, initialized);
+      ensureGroupSettings(settingsFile, initialized);
     }
 
     // Skills directory — created empty here; symlinks are synced at spawn
@@ -148,27 +149,41 @@ export function initGroupFilesystem(
 const PRE_COMPACT_COMMAND = 'bun /app/src/compact-instructions.ts';
 
 /**
- * Patch an existing settings.json to add the PreCompact hook if missing.
- * Runs on every group init so pre-existing groups pick up the hook.
+ * Keep existing settings while enforcing AimClaw's single-identity memory
+ * policy and adding the PreCompact hook if missing. Runs on every group init
+ * so pre-existing groups converge on the same behavior.
  */
-function ensurePreCompactHook(settingsFile: string, initialized: string[]): void {
+function ensureGroupSettings(settingsFile: string, initialized: string[]): void {
   try {
     const raw = fs.readFileSync(settingsFile, 'utf-8');
     const settings = JSON.parse(raw);
+    let changed = false;
+
+    if (!settings.env) settings.env = {};
+    if (settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS !== '0') {
+      settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '0';
+      changed = true;
+    }
+    if (settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY !== '1') {
+      settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
+      changed = true;
+    }
 
     // Check if there's already a PreCompact hook with our command.
     const existing = settings.hooks?.PreCompact as unknown[] | undefined;
-    if (existing && JSON.stringify(existing).includes(PRE_COMPACT_COMMAND)) return;
+    if (!existing || !JSON.stringify(existing).includes(PRE_COMPACT_COMMAND)) {
+      if (!settings.hooks) settings.hooks = {};
+      if (!settings.hooks.PreCompact) settings.hooks.PreCompact = [];
+      settings.hooks.PreCompact.push({
+        hooks: [{ type: 'command', command: PRE_COMPACT_COMMAND }],
+      });
+      changed = true;
+    }
 
-    // Add the hook, preserving existing hooks.
-    if (!settings.hooks) settings.hooks = {};
-    if (!settings.hooks.PreCompact) settings.hooks.PreCompact = [];
-    settings.hooks.PreCompact.push({
-      hooks: [{ type: 'command', command: PRE_COMPACT_COMMAND }],
-    });
-
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
-    initialized.push('settings.json (added PreCompact hook)');
+    if (changed) {
+      fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+      initialized.push('settings.json (single-identity defaults)');
+    }
   } catch {
     // Don't break init if settings.json is malformed — it'll use whatever's there.
   }
