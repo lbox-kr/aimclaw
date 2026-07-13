@@ -78,15 +78,28 @@ Slack 앱이 받은 사람의 DM·멘션은 해당 에이전트의 일반 사용
    - 운영자의 Slack member ID
    - 에이전트 이름과 필요한 provider 인증 정보
 3. 코딩 에이전트가 `.env` 작성, `bash nanoclaw.sh`, Slack wiring과 응답 확인을 진행한다.
-4. 배포 디렉터리를 allowlist와 에이전트 그룹에 연결한다.
+4. GitHub 개인 계정 연결을 완료한 뒤 LBox 저장소를 clone하고 작업공간을 에이전트 그룹에 연결한다.
 
    ```bash
+   mkdir -p ~/nanoclaw-deploy ~/lbox-repos
+
+   while read -r name url; do
+     target="$HOME/lbox-repos/$name"
+     if [ -d "$target/.git" ]; then
+       git -C "$target" fetch --all --prune
+     else
+       git clone --filter=blob:none "$url" "$target"
+     fi
+   done < container/skills/lbox-product-code-search/repos.txt
+
    pnpm exec tsx setup/index.ts --step mounts --force -- --json \
-     '{"allowedRoots":[{"path":"~/nanoclaw-deploy","allowReadWrite":true,"description":"team deploy trigger"}],"blockedPatterns":[]}'
+     '{"allowedRoots":[{"path":"~/nanoclaw-deploy","allowReadWrite":true,"description":"team deploy trigger"},{"path":"~/lbox-repos","allowReadWrite":true,"description":"LBox reference repositories"}],"blockedPatterns":[]}'
 
    # 그룹 id는 ./bin/ncl groups list로 확인한다.
    pnpm exec tsx scripts/q.ts data/v2.db \
-     "UPDATE container_configs SET additional_mounts='[{\"hostPath\":\"~/nanoclaw-deploy\",\"containerPath\":\"deploy\",\"readonly\":false}]' WHERE agent_group_id='<id>'"
+     "UPDATE container_configs SET additional_mounts='[{\"hostPath\":\"~/nanoclaw-deploy\",\"containerPath\":\"deploy\",\"readonly\":false},{\"hostPath\":\"~/lbox-repos\",\"containerPath\":\"lbox-repos\",\"readonly\":false}]' WHERE agent_group_id='<id>'"
+
+   ./bin/ncl groups restart --id <id>
    ```
 
 5. 자동 배포 launchd를 설치한다.

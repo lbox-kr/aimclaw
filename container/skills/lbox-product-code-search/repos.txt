@@ -1,0 +1,5 @@
+lbox-frontend-monorepo https://github.com/lbox-kr/lbox-frontend-monorepo.git
+lbox-server https://github.com/lbox-kr/lbox-server.git
+lbox-argo-applications https://github.com/lbox-kr/lbox-argo-applications.git
+lbox-iam https://github.com/lbox-kr/lbox-iam.git
+lbox-policy https://github.com/lbox-kr/lbox-policy.git
