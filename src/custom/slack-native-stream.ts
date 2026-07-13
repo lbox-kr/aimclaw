@@ -19,7 +19,7 @@ import { removeSlackProcessingReaction } from './slack-processing-reaction.js';
 
 const MAX_STREAM_MS = 30 * 60 * 1000;
 const STREAM_CLOSE_TIMEOUT_MS = 20_000;
-const VALID_TASK_STATUSES = new Set(['pending', 'in_progress', 'complete', 'error']);
+const VALID_TASK_STATUSES = new Set(['in_progress', 'complete', 'error']);
 
 interface StreamRouting {
   platformId: string;
@@ -103,11 +103,9 @@ function parseTask(value: unknown): Extract<NativeStreamChunk, { type: 'task_upd
     type: 'task_update',
     id: task.id.trim().slice(0, 100),
     title: task.title.trim().slice(0, 80),
-    status: task.status as 'pending' | 'in_progress' | 'complete' | 'error',
+    status: task.status as 'in_progress' | 'complete' | 'error',
   };
   if (!chunk.id || !chunk.title) return null;
-  if (typeof task.details === 'string' && task.details.trim()) chunk.details = task.details.trim().slice(0, 256);
-  if (typeof task.output === 'string' && task.output.trim()) chunk.output = task.output.trim().slice(0, 256);
   return chunk;
 }
 
@@ -231,7 +229,7 @@ registerDeliveryAction('stream_task_update', async (content, session, inDb) => {
   active ??= (await startStream(session, inDb, routing)) ?? undefined;
   if (!active || active.failed) return;
 
-  const signature = `${task.status}\0${task.title}\0${task.details ?? ''}\0${task.output ?? ''}`;
+  const signature = `${task.status}\0${task.title}`;
   if (active.lastTasks.get(task.id) === signature) return;
   active.lastTasks.set(task.id, signature);
   active.queue.push(task);

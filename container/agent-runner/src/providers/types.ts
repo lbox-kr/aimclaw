@@ -123,9 +123,7 @@ export interface AgentQuery {
 export interface ProviderTaskUpdate {
   id: string;
   title: string;
-  status: 'pending' | 'in_progress' | 'complete' | 'error';
-  details?: string;
-  output?: string;
+  status: 'in_progress' | 'complete' | 'error';
 }
 
 export type ProviderEvent =

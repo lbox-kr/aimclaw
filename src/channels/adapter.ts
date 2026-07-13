@@ -110,17 +110,13 @@ export type NativeStreamChunk =
       type: 'task_update';
       id: string;
       title: string;
-      status: 'pending' | 'in_progress' | 'complete' | 'error';
-      details?: string;
-      output?: string;
-    }
-  | { type: 'plan_update'; title: string };
+      status: 'in_progress' | 'complete' | 'error';
+    };
 
 export interface NativeStreamOptions {
   recipientUserId?: string;
   recipientTeamId?: string;
-  taskDisplayMode?: 'timeline' | 'plan';
-  stopBlocks?: unknown[];
+  taskDisplayMode?: 'timeline';
 }
 
 /** Non-secret platform identifiers required to address a native stream. */
