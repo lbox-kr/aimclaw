@@ -8,4 +8,5 @@
  * 예: src/custom/my-feature.ts 작성 후 아래에 `import './my-feature.js';`
  */
 import './current-thread-history.js';
+import './lbox-aws.js';
 import './slack-user-access.js';

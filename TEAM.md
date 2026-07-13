@@ -145,6 +145,26 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
 `status.json`의 `state`가 `failed`면 기존 프로세스는 계속 실행된다. 실패 원인을
 수정하거나 문제 커밋을 revert하면 다음 자동 배포에서 다시 시도한다.
 
+## LBox AWS 정적 파일 배포
+
+관리자는 Slack 메시지에 파일을 첨부하고 배포 대상과 함께 요청한다. 봇은 첨부파일을
+호스트 전용 staging에 복사해 SHA-256을 확정한 뒤 관리자 승인 카드를 보낸다. 승인
+후 Mac mini의 AWS CLI로 백업, 업로드, 원격 검증, CloudFront invalidation 완료까지
+처리한다. AWS credential과 `~/.aws`는 컨테이너에 전달하지 않는다.
+
+현재 지원 profile은 `lbox-system`이다. SSO가 만료됐다는 응답이 오면 Mac mini에서
+다음 명령으로 로그인한 뒤 같은 Slack 요청을 다시 실행한다.
+
+```bash
+aws sso login --profile lbox-system
+```
+
+허용된 배포 경로는 `container/skills/lbox-aws/references/targets.json`에서 관리한다.
+`lbox-static-html` target은 `public/lbox/static-html/` 아래의 HTML을 지원하며, 기본
+목적지는 첨부파일명이다. 다른 이름으로 배포할 때는 target 범위 안의 상대
+`--destination`만 지정한다. 승인 전 staging 사본과 배포 전 백업은 Git에 포함되지
+않는 `data/team-lbox-aws/` 아래에 저장한다.
+
 ## Upstream 갱신
 
 개발 머신에서 주기적으로 진행하고 Mac mini에서는 직접 갱신하지 않는다.

@@ -1,0 +1,13 @@
+{
+  "lbox-static-html": {
+    "description": "LBox CDN public/lbox/static-html 배포 영역",
+    "profile": "lbox-system",
+    "s3UriPrefix": "s3://lbox-eng-prd-s3-cdn-lbox/public/lbox/static-html/",
+    "contentType": "text/html",
+    "sse": "AES256",
+    "distributionId": "E1WVH20E0K2UEH",
+    "invalidationPathPrefix": "/public/lbox/static-html/",
+    "cdnUrlPrefix": "https://cdn.lbox.kr/public/lbox/static-html/",
+    "allowedExtensions": [".html"]
+  }
+}
