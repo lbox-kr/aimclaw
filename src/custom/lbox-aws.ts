@@ -304,7 +304,7 @@ async function requestStaticFileDeployment(
     session,
     agentName,
     action: ACTION,
-    payload: staged,
+    payload: { ...staged },
     title: 'LBox AWS 정적 파일 배포',
     question: [
       `Agent: ${agentName}`,
