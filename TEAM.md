@@ -14,8 +14,8 @@ LBox 팀 공용 Slack 에이전트의 설치, 배포, 갱신과 복구 방법을
 
 ## 모델 위임
 
-Claude provider는 기본적으로 Haiku를 사용하고, 판단이 필요한 작업은 일회성
-Opus Task에 위임한다. 명시적인 그룹별 model 설정은 이 기본값보다 우선한다.
+Claude provider는 기본적으로 Haiku를 사용하고, 판단이 필요한 작업은 최대 effort의
+일회성 Opus Task에 위임한다. 명시적인 그룹별 model 설정은 이 기본값보다 우선한다.
 
 ## 사용자와 권한
 
