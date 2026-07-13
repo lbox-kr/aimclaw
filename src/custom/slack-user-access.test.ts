@@ -174,7 +174,7 @@ describe('Slack channel automatic connection', () => {
     expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'ag-1')).toMatchObject({
       engage_mode: 'mention-sticky',
       sender_scope: 'known',
-      ignored_message_policy: 'accumulate',
+      ignored_message_policy: 'drop',
       session_mode: 'shared',
     });
     expect(isMember('slack:U123', 'ag-1')).toBe(true);

@@ -32,7 +32,7 @@ import {
 import { findSessionForAgent } from './db/sessions.js';
 import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
-import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
+import { resolveSession, withInboundDb, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
 import { getSession } from './db/sessions.js';
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
@@ -433,13 +433,12 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
  *                      user wants to disambiguate between multiple agents
  *                      wired to one chat, use engage_mode='pattern' with
  *                      the disambiguator as the regex.
- *   'mention-sticky' — platform mention OR an active per-thread session
- *                      already exists for this (agent, mg, thread). The
- *                      session existence IS our subscription state; once
- *                      a thread has engaged us once, follow-ups arrive
- *                      with no mention and should still fire.
+ *   'mention-sticky' — platform mention OR a per-thread session that already
+ *                      contains a triggered message. Once a thread has
+ *                      actually engaged us, follow-ups arrive with no mention
+ *                      and should still fire; accumulate-only sessions do not.
  */
-function evaluateEngage(
+export function evaluateEngage(
   agent: MessagingGroupAgent,
   text: string,
   isMention: boolean,
@@ -461,14 +460,30 @@ function evaluateEngage(
       return isMention;
     case 'mention-sticky': {
       if (isMention) return true;
-      // Sticky follow-up: session already exists for this (agent, mg, thread)
-      // — the thread was activated before, keep firing.
       if (mg.is_group === 0) return false; // DMs never use mention-sticky sensibly
+      // Only genuine sub-threads are sticky. A channel-root session must not
+      // turn every later channel message into an implicit invocation.
+      if (!threadId || threadId === mg.platform_id) return false;
       const existing = findSessionForAgent(agent.agent_group_id, mg.id, threadId);
-      return existing !== undefined;
+      if (!existing) return false;
+      // Accumulated context also creates a session, so session existence does
+      // not prove the agent was invoked. Require a previously triggered row.
+      return sessionHasEngagedMessage(agent.agent_group_id, existing.id);
     }
     default:
       return false;
+  }
+}
+
+function sessionHasEngagedMessage(agentGroupId: string, sessionId: string): boolean {
+  try {
+    return withInboundDb(
+      agentGroupId,
+      sessionId,
+      (db) => db.prepare('SELECT 1 FROM messages_in WHERE trigger = 1 LIMIT 1').get() !== undefined,
+    );
+  } catch {
+    return false;
   }
 }
 

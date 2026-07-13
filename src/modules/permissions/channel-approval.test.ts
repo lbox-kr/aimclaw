@@ -35,6 +35,7 @@ const telegramDefaults: ChannelDefaults = {
   mentions: 'platform',
 };
 registerChannelAdapter('telegram', { factory: () => null, defaults: telegramDefaults });
+registerChannelAdapter('slack-approval', { factory: () => null, defaults: telegramDefaults });
 
 // Mock container runner — prevent actual docker spawn.
 vi.mock('../../container-runner.js', () => ({
@@ -136,6 +137,14 @@ function groupMention(platformId: string, text = '@bot hello') {
       isMention: true,
       isGroup: true, // group context comes from the adapter flag, never threadId
     },
+  };
+}
+
+function slackGroupMention(platformId: string) {
+  return {
+    ...groupMention(platformId),
+    channelType: 'slack',
+    instance: 'slack-approval',
   };
 }
 
@@ -296,6 +305,20 @@ describe('unknown-channel registration flow', () => {
       .get(pending.messaging_group_id) as { engage_mode: string; engage_pattern: string };
     expect(mga.engage_mode).toBe('pattern');
     expect(mga.engage_pattern).toBe('.');
+  });
+
+  it('approved Slack channels fetch history on demand instead of accumulating ignored traffic', async () => {
+    const { routeInbound } = await import('../../router.js');
+    await routeInbound(slackGroupMention('slack:CAPPROVE'));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const mgId = await approvePending();
+    const { getDb } = await import('../../db/connection.js');
+    const wiring = getDb()
+      .prepare('SELECT ignored_message_policy FROM messaging_group_agents WHERE messaging_group_id = ?')
+      .get(mgId) as { ignored_message_policy: string };
+
+    expect(wiring.ignored_message_policy).toBe('drop');
   });
 
   // WhatsApp-like platform: groups exist but thread ids don't (threadId is
