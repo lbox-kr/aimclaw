@@ -51,7 +51,7 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'slack:C1',
       threadId: null,
       instance: 'slack-tester',
-      status: '요청을 처리하고 있어요',
+      status: '입력 중…',
     });
   });
 
@@ -108,7 +108,7 @@ describe('startTypingRefresh — instance forwarding', () => {
       platformId: 'tg:99',
       threadId: null,
       instance: 'telegram',
-      status: '요청을 처리하고 있어요',
+      status: '입력 중…',
     });
 
     // Interval ticks fire from the stored entry — all four fields must
@@ -122,12 +122,12 @@ describe('startTypingRefresh — instance forwarding', () => {
         platformId: 'tg:99',
         threadId: null,
         instance: 'telegram',
-        status: '요청을 처리하고 있어요',
+        status: '입력 중…',
       });
     }
   });
 
-  it('updates the native status immediately and keeps it for later refresh ticks', async () => {
+  it('keeps a generic typing indicator when generated phase text arrives', async () => {
     const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', 'T1', 'slack');
     await vi.advanceTimersByTimeAsync(0);
@@ -136,12 +136,12 @@ describe('startTypingRefresh — instance forwarding', () => {
     updateTypingStatus('sess-1', 'Jira에서 할 일을 조회하는 중이에요');
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toHaveLength(1);
-    expect(calls[0].status).toBe('Jira에서 할 일을 조회하는 중이에요');
+    expect(calls[0].status).toBe('입력 중…');
 
     calls.length = 0;
     await vi.advanceTimersByTimeAsync(4_500);
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    expect(calls[calls.length - 1].status).toBe('Jira에서 할 일을 조회하는 중이에요');
+    expect(calls[calls.length - 1].status).toBe('입력 중…');
   });
 
   it('serializes terminal clear after an in-flight status and never refreshes again', async () => {
