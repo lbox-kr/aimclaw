@@ -129,13 +129,6 @@ export function getCurrentInReplyTo(): string | null {
  * only the message id; the host keeps the associated user identity privately.
  */
 export function setCurrentRequestMessageId(id: string | null): void {
-  if (id === null) {
-    clearCurrentRequestMessageId();
-    return;
-  }
-  setValue(REQUEST_MESSAGE_KEY, id);
-}
-
-export function clearCurrentRequestMessageId(): void {
-  deleteValue(REQUEST_MESSAGE_KEY);
+  if (id === null) deleteValue(REQUEST_MESSAGE_KEY);
+  else setValue(REQUEST_MESSAGE_KEY, id);
 }

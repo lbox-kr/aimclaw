@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { getOutboundDb, initTestSessionDb } from './connection.js';
 import {
   clearContinuation,
-  clearCurrentRequestMessageId,
   getContinuation,
   migrateLegacyContinuation,
   setContinuation,
@@ -22,7 +21,7 @@ describe('session-state — active request attribution', () => {
       .get() as { value: string };
     expect(current.value).toBe('message-1');
 
-    clearCurrentRequestMessageId();
+    setCurrentRequestMessageId(null);
 
     expect(
       getOutboundDb().prepare("SELECT value FROM session_state WHERE key = 'current_request_message_id'").get(),

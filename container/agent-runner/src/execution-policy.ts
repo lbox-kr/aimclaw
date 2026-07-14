@@ -47,8 +47,7 @@ function readPolicy(content: string): ExecutionPolicy | null {
 
 /** One runner serves one session, so one mutable policy follows its active query. */
 export function setExecutionPolicyForMessages(messages: AuthorizationMessage[]): string | null {
-  const triggering = messages.filter((message) => message.trigger === 1);
-  const message = triggering.at(-1) ?? messages.at(-1);
+  const message = messages.filter((message) => message.trigger === 1).at(-1) ?? messages.at(-1);
   const trustedSystem = message?.kind === 'task' || message?.kind === 'system' || message?.channel_type === 'agent';
   currentPolicy =
     (message && readPolicy(message.content)) ?? (trustedSystem ? { ...memberPolicy, role: 'system' } : memberPolicy);

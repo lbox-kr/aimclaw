@@ -12,7 +12,6 @@ import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
   clearContinuation,
   clearCurrentInReplyTo,
-  clearCurrentRequestMessageId,
   migrateLegacyContinuation,
   setContinuation,
   setCurrentInReplyTo,
@@ -292,7 +291,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       });
     } finally {
       clearCurrentInReplyTo();
-      clearCurrentRequestMessageId();
+      setCurrentRequestMessageId(null);
     }
 
     // Ensure completed even if processQuery ended without a result event
