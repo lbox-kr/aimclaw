@@ -97,9 +97,22 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(welcome).toContain('질문이나 작업을 이미 요청했다면 환영 절차를 실행하지 않고');
   });
 
-  it('keeps Slack conversation matching subordinate to the shared honorific rule', () => {
-    const skill = read('container/skills/slack-formatting/SKILL.md');
-    expect(skill).toContain('공통 높임법 규칙을 유지하면서');
+  it('keeps response-style responsibilities in their owning prompt layer', () => {
+    const contract = read('container/CLAUDE.md');
+    const slack = read('container/skills/slack-formatting/SKILL.md');
+    const slackInstructions = read('container/skills/slack-formatting/instructions.md');
+    const productSearch = read('container/skills/lbox-product-code-search/SKILL.md');
+
+    expect(contract).toContain('기존 구조를 그대로 반복하지 않고');
+    expect(contract).toContain('공식 보고서 문체를 요청하지 않았다면');
+    expect(slackInstructions).toContain('최종 응답 전에 `/slack-formatting`을 사용한다');
+    expect(slack).toContain('공통 높임법 규칙을 유지하면서');
+    expect(slack).toContain('공통 상태는 상위에서 한 번');
+    expect(slack).toContain('각 항목에 같은 emoji를 반복');
+    expect(productSearch).toContain('commit에 고정된 짧은 코드 링크');
+    expect(slackInstructions).not.toContain('명사형 종결');
+    expect(slack).not.toContain('commit에 고정된');
+    expect(productSearch).not.toContain('공통 상태');
   });
 
   for (const file of ['scripts/init-first-agent.ts', 'scripts/init-cli-agent.ts']) {
