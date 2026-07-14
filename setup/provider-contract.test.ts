@@ -108,7 +108,7 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(slackInstructions).toContain('최종 응답 전에 `/slack-formatting`을 사용한다');
     expect(slack).toContain('공통 높임법 규칙을 유지하면서');
     expect(slack).toContain('공통 상태는 상위에서 한 번');
-    expect(slack).toContain('각 항목에 같은 emoji를 반복');
+    expect(slack).toContain('상태를 비교하는 목록에서는 항목마다');
     expect(productSearch).toContain('commit에 고정된 짧은 코드 링크');
     expect(slackInstructions).not.toContain('명사형 종결');
     expect(slack).not.toContain('commit에 고정된');
