@@ -1,70 +1,49 @@
 ---
 name: team-jira
-description: 팀 일감(Jira 이슈)을 조회·검색·생성·코멘트한다. 사용자가 "일감", "내 티켓", "할당된 이슈", "지라", "스프린트", "뭐 해야 하지", "할 일 뭐 있어", "이 이슈 상태" 처럼 업무 항목을 묻거나 다루라고 하면 이 스킬을 사용한다. Jira는 lbox.atlassian.net이고 OneCLI 게이트웨이가 인증을 자동 주입한다. 코드가 어디에 있는지 추적하는 요청에는 lbox-product-code-search를 쓴다.
+description: 팀 일감(Jira 이슈)을 Atlassian MCP로 조회·검색·생성·코멘트한다. 사용자가 "일감", "내 티켓", "할당된 이슈", "지라", "스프린트", "뭐 해야 하지", "할 일 뭐 있어", "이 이슈 상태" 처럼 업무 항목을 묻거나 다루라고 하면 이 스킬을 사용한다. 코드가 어디에 있는지 추적하는 요청에는 lbox-product-code-search를 쓴다.
 ---
 
 # Team Jira — 일감 조회·관리
 
-LBox 팀의 일감은 Jira(`https://lbox.atlassian.net`, 주 프로젝트 키 `AIM`)에 있다. 너의 HTTP 요청은 OneCLI 게이트웨이를 거치며 인증이 자동 주입되므로 **그냥 `curl`로 실제 API를 호출**하면 된다. 토큰을 묻거나 다루지 않는다.
+LBox 팀의 일감은 Jira(`https://lbox.atlassian.net`, 주 프로젝트 키 `AIM`)에 있다. Jira는 **Atlassian MCP 도구로만** 다룬다. 인증과 권한은 외부 MCP 호스트에 연결된 Jira 실행 계정이 소유한다.
 
 ## 철칙
 
-- "일감/티켓/지라"를 묻는데 **연결 상태를 추측하지 않는다.** 먼저 아래 호출을 실제로 실행하고 그 결과로 답한다.
-- 응답이 `401`/`403`/`app_not_connected`이면 본문의 `connect_url`을 각괄호·마크다운 없이 한 줄로 안내한다. 그런 필드가 없으면 사용자에게 OneCLI 대시보드에서 Jira를 연결하라고 안내한다.
-- 그 외 에러(400 등)는 JQL이나 파라미터 문제일 수 있으니 메시지를 읽고 고쳐 재시도한다.
+- 우선 Atlassian MCP 도구를 찾고 실제 호출해 결과로 답한다. 도구가 지연 로드되면 `ToolSearch`에서 `atlassian`, `jira`로 찾는다.
+- Jira REST API를 `curl`, `fetch`, 브라우저나 일반 HTTP 클라이언트로 직접 호출하지 않는다.
+- Jira에 OneCLI credential 주입, OneCLI 대시보드 연결이나 컨테이너 내 로그인을 시도하지 않는다.
+- MCP 도구가 없거나 인증이 필요하면 "호스트에서 Jira 로그인을 완료한 뒤 다시 요청해 달라"고 알리고 중단한다. REST나 OneCLI로 우회하지 않는다.
+- 연결된 Jira 실행 계정을 권한 주체로 간주한다. "내 일감"은 이 계정에 할당된 일감을 뜻한다.
+
+## MCP 도구 선택
+
+서버 namespace와 표시 이름은 호스트 설정에 따라 다를 수 있다. 도구의 실제 스키마를 확인하고 아래 의도에 맞는 Atlassian MCP 도구를 사용한다.
+
+- 연결 정보: `getAccessibleAtlassianResources`, `atlassianUserInfo`
+- JQL 검색: `searchJiraIssuesUsingJql`
+- 이슈 상세: `getJiraIssue`
+- 프로젝트·사용자 탐색: `getVisibleJiraProjects`, `lookupJiraAccountId`
+- 이슈 작성: `createJiraIssue`, `addCommentToJiraIssue`, `editJiraIssue`, `transitionJiraIssue`
+
+처음 호출하는 사이트라면 `getAccessibleAtlassianResources`로 `lbox.atlassian.net`의 `cloudId`를 확인한 뒤 후속 Jira 도구에 넘긴다.
 
 ## 조회 (검색)
 
-엔드포인트는 **`/rest/api/3/search/jql`** 이다. 구 `/rest/api/3/search`는 삭제되어 `410`을 반환하니 쓰지 않는다.
-
-```bash
-# 내 미완료 일감 (가장 흔한 요청: "내 일감", "할 일")
-curl -sS "https://lbox.atlassian.net/rest/api/3/search/jql" \
-  --data-urlencode 'jql=assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC' \
-  --data-urlencode 'maxResults=20' \
-  --data-urlencode 'fields=summary,status,priority,updated' -G
-```
-
-- 페이지네이션은 응답의 `nextPageToken`을 `&nextPageToken=...`로 넘겨 이어 받는다. `isLast=true`면 끝이다.
+- `searchJiraIssuesUsingJql`에 JQL과 필요한 field, 결과 수를 넘긴다. 페이지네이션은 MCP 도구 응답과 스키마를 따른다.
 - 자주 쓰는 JQL:
   - 내 전체 일감: `assignee = currentUser() ORDER BY updated DESC`
   - 진행 중만: `assignee = currentUser() AND status = "진행 중"`
   - 특정 프로젝트: `project = AIM AND statusCategory != Done ORDER BY updated DESC`
   - 이번 스프린트 내 것: `assignee = currentUser() AND sprint in openSprints()`
-- 담당자를 특정 사람으로 지정하려면 먼저 `GET /rest/api/3/user/search?query=<이름/이메일>`로 `accountId`를 찾아 `assignee = "<accountId>"`로 건다.
+- 담당자를 특정 사람으로 지정하려면 `lookupJiraAccountId`로 `accountId`를 찾아 JQL에 사용한다.
 
 ## 이슈 상세
 
-```bash
-curl -sS "https://lbox.atlassian.net/rest/api/3/issue/AIM-1234?fields=summary,status,assignee,priority,description,updated"
-```
+`getJiraIssue`에 `cloudId`, 이슈 키와 필요한 field를 넘긴다.
 
 ## 이슈 생성 / 코멘트
 
-`description`과 코멘트 본문은 Atlassian Document Format(ADF, JSON)이어야 한다.
-
-```bash
-# 생성
-curl -sS -X POST "https://lbox.atlassian.net/rest/api/3/issue" \
-  -H 'Content-Type: application/json' -d '{
-  "fields": {
-    "project": { "key": "AIM" },
-    "issuetype": { "name": "Task" },
-    "summary": "요약",
-    "description": { "type":"doc","version":1,"content":[
-      {"type":"paragraph","content":[{"type":"text","text":"본문"}]} ] }
-  }
-}'
-
-# 코멘트
-curl -sS -X POST "https://lbox.atlassian.net/rest/api/3/issue/AIM-1234/comment" \
-  -H 'Content-Type: application/json' -d '{
-  "body": { "type":"doc","version":1,"content":[
-    {"type":"paragraph","content":[{"type":"text","text":"코멘트 내용"}]} ] }
-}'
-```
-
-이슈를 생성·수정하는 건 되돌리기 어려운 작업이니, 요약/프로젝트/타입을 사용자에게 한 번 확인한 뒤 실행한다.
+MCP 도구가 요구하는 스키마로 본문을 구성한다. 이슈를 생성·수정·전환하는 건 되돌리기 어려운 작업이니, 대상·변경 내용을 사용자에게 한 번 확인한 뒤 MCP 작성 도구를 호출한다.
 
 ## Slack에 보여주기
 
