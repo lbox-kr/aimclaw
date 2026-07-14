@@ -9,7 +9,7 @@ import {
   getMessagingGroupAgentByPair,
   getMessagingGroupByPlatform,
 } from '../db/messaging-groups.js';
-import { isMember } from '../modules/permissions/db/agent-group-members.js';
+import { addMember, isMember } from '../modules/permissions/db/agent-group-members.js';
 import {
   createPendingChannelApproval,
   getPendingChannelApproval,
@@ -54,6 +54,25 @@ function event(text: string): InboundEvent {
       kind: 'chat-sdk',
       content: JSON.stringify({ text, senderId: 'UOWNER' }),
       timestamp: now(),
+      isMention: true,
+      isGroup: true,
+    },
+  };
+}
+
+function directMessage(senderId: string, platformId: string, messageId = 'dm-message-1'): InboundEvent {
+  return {
+    channelType: 'slack',
+    instance: 'slack',
+    platformId,
+    threadId: platformId,
+    message: {
+      id: messageId,
+      kind: 'chat-sdk',
+      content: JSON.stringify({ text: '안녕하세요', senderId, senderName: 'Slack 사용자' }),
+      timestamp: now(),
+      isMention: true,
+      isGroup: false,
     },
   };
 }
@@ -126,12 +145,65 @@ describe('request authorization', () => {
     });
   });
 
-  it('automatically registers a Slack workspace sender as a general user of the addressed agent', () => {
+  it('automatically registers a mentioned Slack channel sender as a general user of the addressed agent', () => {
     user('slack:U2');
 
     applyRequestPolicy(event('안녕하세요'), 'slack:U2', 'ag-1');
 
     expect(isMember('slack:U2', 'ag-1')).toBe(true);
+  });
+});
+
+describe('Slack DM access', () => {
+  it('drops a general user DM without creating a channel or approval flow', async () => {
+    user('slack:UMEMBER');
+    const { routeInbound } = await import('../router.js');
+    const { wakeContainer } = await import('../container-runner.js');
+
+    await routeInbound(directMessage('UMEMBER', 'slack:DMEMBER'));
+
+    expect(getMessagingGroupByPlatform('slack', 'slack:DMEMBER', 'slack')).toBeUndefined();
+    expect(wakeContainer).not.toHaveBeenCalled();
+  });
+
+  it('automatically connects a current administrator DM and routes its first message', async () => {
+    user('slack:UADMIN');
+    grantRole({ user_id: 'slack:UADMIN', role: 'admin', agent_group_id: null, granted_by: null, granted_at: now() });
+    const { routeInbound } = await import('../router.js');
+    const { wakeContainer } = await import('../container-runner.js');
+
+    await routeInbound(directMessage('UADMIN', 'slack:DADMIN'));
+
+    const messagingGroup = getMessagingGroupByPlatform('slack', 'slack:DADMIN', 'slack');
+    expect(messagingGroup).toMatchObject({ is_group: 0, unknown_sender_policy: 'strict' });
+    expect(getMessagingGroupAgentByPair(messagingGroup!.id, 'ag-1')).toMatchObject({
+      engage_mode: 'pattern',
+      engage_pattern: '.',
+      sender_scope: 'known',
+    });
+    expect(getPendingChannelApproval(messagingGroup!.id)).toBeUndefined();
+    expect(wakeContainer).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks the next DM after administrator removal even when wiring and membership remain', async () => {
+    user('slack:owner');
+    user('slack:UADMIN');
+    grantRole({ user_id: 'slack:owner', role: 'owner', agent_group_id: null, granted_by: null, granted_at: now() });
+    grantRole({ user_id: 'slack:UADMIN', role: 'admin', agent_group_id: null, granted_by: null, granted_at: now() });
+    addMember({ user_id: 'slack:UADMIN', agent_group_id: 'ag-1', added_by: null, added_at: now() });
+    const { routeInbound } = await import('../router.js');
+    const { wakeContainer } = await import('../container-runner.js');
+
+    await routeInbound(directMessage('UADMIN', 'slack:DADMIN'));
+    const messagingGroup = getMessagingGroupByPlatform('slack', 'slack:DADMIN', 'slack')!;
+    expect(changeAdministrator('slack:owner', { action: 'remove', targetUserId: 'slack:UADMIN' }).ok).toBe(true);
+    expect(isMember('slack:UADMIN', 'ag-1')).toBe(true);
+    vi.mocked(wakeContainer).mockClear();
+
+    await routeInbound(directMessage('UADMIN', 'slack:DADMIN', 'dm-message-2'));
+
+    expect(getMessagingGroupAgentByPair(messagingGroup.id, 'ag-1')).toBeDefined();
+    expect(wakeContainer).not.toHaveBeenCalled();
   });
 });
 
