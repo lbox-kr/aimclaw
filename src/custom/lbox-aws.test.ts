@@ -9,7 +9,7 @@ vi.mock('../config.js', async () => {
   return { ...actual, DATA_DIR: '/tmp/aimclaw-test-lbox-aws-data' };
 });
 
-import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from '../db/index.js';
+import { closeDb, createAgentGroup, initTestDb, runMigrations } from '../db/index.js';
 import { createUser } from '../modules/permissions/db/users.js';
 import { grantRole } from '../modules/permissions/db/user-roles.js';
 import { resolveSession, sessionDir } from '../session-manager.js';
@@ -196,17 +196,6 @@ describe('LBox AWS request authorization', () => {
       agent_provider: null,
       created_at: new Date().toISOString(),
     });
-    createMessagingGroup({
-      id: 'mg-1',
-      channel_type: 'slack',
-      platform_id: 'D1',
-      instance: 'slack',
-      name: '관리자 DM',
-      is_group: 0,
-      unknown_sender_policy: 'strict',
-      denied_at: null,
-      created_at: new Date().toISOString(),
-    });
     createUser({ id: 'slack:UADMIN', kind: 'slack', display_name: '관리자', created_at: new Date().toISOString() });
     grantRole({
       user_id: 'slack:UADMIN',
@@ -223,7 +212,7 @@ describe('LBox AWS request authorization', () => {
   });
 
   it('starts deployment without an approval card for a host-attributed administrator', async () => {
-    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    const { session } = resolveSession('ag-1', null, null, 'agent-shared');
     const inbox = path.join(sessionDir('ag-1', session.id), 'inbox', 'message-1');
     fs.mkdirSync(inbox, { recursive: true });
     fs.writeFileSync(path.join(inbox, 'guide.html'), '<!doctype html><title>guide</title>');
@@ -238,7 +227,7 @@ describe('LBox AWS request authorization', () => {
         caller: 'agent',
         sessionId: session.id,
         agentGroupId: 'ag-1',
-        messagingGroupId: 'mg-1',
+        messagingGroupId: '',
         requesterUserId: 'slack:UADMIN',
       },
       applyDeployment,
