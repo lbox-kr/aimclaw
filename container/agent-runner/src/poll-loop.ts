@@ -8,6 +8,7 @@ import {
   type MessageInRow,
 } from './db/messages-in.js';
 import { hasTaskSend, writeMessageOut } from './db/messages-out.js';
+import { clearTurnSends, wasSentThisTurn } from './turn-sends.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
   clearContinuation,
@@ -549,6 +550,10 @@ export async function processQuery(
           endNativeStream(routing);
           nativeStreamActive = false;
         }
+        // A completed turn resets the mid-turn send record so the next turn
+        // starts clean. Keep it across a wrapping-retry: the re-sent final text
+        // must still dedup against sends made during the same user prompt.
+        if (!keepNativeStreamOpen) clearTurnSends();
       }
     }
   } catch (err) {
@@ -565,6 +570,10 @@ export async function processQuery(
     // aborted or disconnected. Clean up an open Slack timeline instead of
     // leaving it around until the host-side safety TTL.
     if (nativeStreamActive) endNativeStream(routing);
+    // Drop any mid-turn send record if the iterator terminated without a
+    // final result event (abort/disconnect) so a stale entry can't suppress a
+    // real message on the next query.
+    clearTurnSends();
     done = true;
     clearInterval(pollHandle);
   }
@@ -740,13 +749,23 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
   // different destinations have different thread contexts — using a single
   // routing.threadId would stamp one channel's thread onto another.
   const destRouting = getDestinationReplyRouting(channelType, platformId);
+  const threadId = destRouting?.threadId ?? null;
+  // Drop the turn-final echo when the agent already delivered this exact text
+  // to the same destination via a mid-turn send_message this turn. Otherwise
+  // the line lands twice — once from the MCP send, once from this final-text
+  // dispatch. (The taskFire branch above covers scheduled sends; this covers
+  // ordinary interactive chat turns, keyed on destination + text.)
+  if (wasSentThisTurn(channelType, platformId, threadId, body)) {
+    log(`Dropping turn-final echo of an already-sent message to ${dest.name}`);
+    return;
+  }
   writeMessageOut({
     id: generateId(),
     in_reply_to: routing.taskFire ? null : (destRouting?.inReplyTo ?? routing.inReplyTo),
     kind: 'chat',
     platform_id: platformId,
     channel_type: channelType,
-    thread_id: destRouting?.threadId ?? null,
+    thread_id: threadId,
     content: JSON.stringify({ text: body, _nanoclawFinal: true }),
   });
 }

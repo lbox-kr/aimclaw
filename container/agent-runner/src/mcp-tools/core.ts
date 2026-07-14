@@ -15,6 +15,7 @@ import { getDestinationReplyRouting } from '../db/messages-in.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
 import { getCurrentInReplyTo } from '../db/session-state.js';
 import { getSessionRouting } from '../db/session-routing.js';
+import { recordTurnSend } from '../turn-sends.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
 
@@ -132,6 +133,10 @@ export const sendMessage: McpToolDefinition = {
       thread_id: routing.thread_id,
       content: JSON.stringify({ text }),
     });
+
+    // Remember this exact delivery so the turn-final <message> dispatch can
+    // drop an identical echo instead of posting the same line a second time.
+    recordTurnSend(routing.channel_type, routing.platform_id, routing.thread_id, text);
 
     log(`send_message: #${seq} → ${routing.resolvedName}`);
     return ok(`Message sent to ${routing.resolvedName} (id: ${seq})`);

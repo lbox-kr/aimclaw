@@ -7,9 +7,13 @@ import { formatMessages, extractRouting } from './formatter.js';
 import { isCorruptionError, processQuery } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 import type { AgentQuery, ProviderEvent } from './providers/types.js';
+import { clearTurnSends, recordTurnSend } from './turn-sends.js';
 
 beforeEach(() => {
   initTestSessionDb();
+  // turn-sends is process-global; reset it so a prior test's record can't
+  // suppress a message here.
+  clearTurnSends();
 });
 
 afterEach(() => {
@@ -487,6 +491,79 @@ describe('task result deduplication', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toBe('배포를 완료했어요.');
+  });
+});
+
+describe('interactive turn deduplication', () => {
+  const routing = {
+    platformId: 'slack:D1',
+    channelType: 'slack',
+    threadId: 'slack:D1:1712345678.000100',
+    inReplyTo: 'm1',
+  };
+
+  function seedMidTurnSend(text: string): void {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('dm', 'DM', 'channel', 'slack', 'slack:D1', NULL)`,
+      )
+      .run();
+    // The user's inbound DM — this is what getDestinationReplyRouting resolves
+    // the reply thread_id from, so the final dispatch keys on the same thread
+    // the mid-turn send recorded under.
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, trigger, channel_type, platform_id, thread_id, content)
+         VALUES ('m1', 'chat-sdk', datetime('now'), 'processing', 1, 'slack', 'slack:D1', ?, ?)`,
+      )
+      .run(routing.threadId, JSON.stringify({ text: 'hi' }));
+    // Mirror what the send_message MCP tool does: write the standalone chat row
+    // (no _nanoclawFinal marker) and record the delivery for the turn.
+    writeMessageOut({
+      id: 'mcp-send-1',
+      in_reply_to: routing.inReplyTo,
+      kind: 'chat',
+      platform_id: routing.platformId,
+      channel_type: routing.channelType,
+      thread_id: routing.threadId,
+      content: JSON.stringify({ text }),
+    });
+    recordTurnSend(routing.channelType, routing.platformId, routing.threadId, text);
+  }
+
+  it('drops a turn-final <message> that echoes a mid-turn send_message', async () => {
+    const text = 'AIM에서 여러 문제를 함께 풀면서 정이 든 팀이라서요.';
+    seedMidTurnSend(text);
+    const { query } = makeResultQuery({
+      type: 'result',
+      text: `<message to="dm">${text}</message>`,
+    });
+
+    await processQuery(query, routing, ['m1'], 'claude', undefined, 'prompt', undefined);
+
+    // Only the mid-turn send survives — the identical final echo is dropped.
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe(text);
+    expect(JSON.parse(out[0].content)._nanoclawFinal).toBeUndefined();
+  });
+
+  it('keeps a turn-final <message> whose text differs from the mid-turn send', async () => {
+    seedMidTurnSend('중간 상태를 먼저 알려드려요.');
+    const finalText = '정리하면 최종 답변은 이거예요.';
+    const { query } = makeResultQuery({
+      type: 'result',
+      text: `<message to="dm">${finalText}</message>`,
+    });
+
+    await processQuery(query, routing, ['m1'], 'claude', undefined, 'prompt', undefined);
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(2);
+    const finalRow = out.find((m) => JSON.parse(m.content)._nanoclawFinal === true);
+    expect(finalRow).toBeDefined();
+    expect(JSON.parse(finalRow!.content).text).toBe(finalText);
   });
 });
 
