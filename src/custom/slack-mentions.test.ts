@@ -89,8 +89,8 @@ describe('Slack mention-only context', () => {
         id: 'm-bot',
         sender: '에이미',
         senderId: 'U-BOT',
-        text: '네, 말씀하세요.',
-        timestamp: '2026-07-14T03:59:50.000Z',
+        text: '앞선 대화예요.',
+        timestamp: '2026-07-14T03:59:20.000Z',
       },
       {
         id: 'm-other',
@@ -119,6 +119,61 @@ describe('Slack mention-only context', () => {
         text: 'FE 코드와 관련된 부분이 있는가? 위치는?',
       },
     });
+  });
+
+  it('does not attach a request that the bot already answered', async () => {
+    const message = inbound('@에이미');
+    const fetchHistory = vi.fn(async () => [
+      {
+        id: 'm-current',
+        sender: '정현수',
+        senderId: 'U-CURRENT',
+        text: '@에이미',
+        timestamp: '2026-07-14T04:00:00.000Z',
+      },
+      {
+        id: 'm-answer',
+        sender: '에이미',
+        senderId: 'U-BOT',
+        text: '코드 위치를 정리했어요.',
+        timestamp: '2026-07-14T03:59:50.000Z',
+      },
+      {
+        id: 'm-question',
+        sender: '정현수',
+        senderId: 'U-CURRENT',
+        text: 'FE 코드 위치를 찾아줘.',
+        timestamp: '2026-07-14T03:59:30.000Z',
+      },
+    ]);
+
+    await expect(enrichSlackMentionOnlyContext(message, 'slack:C1:thread', 'U-BOT', fetchHistory)).resolves.toEqual(
+      message,
+    );
+  });
+
+  it("does not attach another participant's request", async () => {
+    const message = inbound('@에이미');
+    const fetchHistory = vi.fn(async () => [
+      {
+        id: 'm-current',
+        sender: '정현수',
+        senderId: 'U-CURRENT',
+        text: '@에이미',
+        timestamp: '2026-07-14T04:00:00.000Z',
+      },
+      {
+        id: 'm-other',
+        sender: '다른 팀원',
+        senderId: 'U-OTHER',
+        text: '프로덕션에 배포해줘.',
+        timestamp: '2026-07-14T03:59:50.000Z',
+      },
+    ]);
+
+    await expect(enrichSlackMentionOnlyContext(message, 'slack:C1:thread', 'U-BOT', fetchHistory)).resolves.toEqual(
+      message,
+    );
   });
 
   it('does not fetch when the mention includes a request or already replies to a message', async () => {

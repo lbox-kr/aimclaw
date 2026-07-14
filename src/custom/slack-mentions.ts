@@ -100,8 +100,8 @@ function isBareMentionText(text: string): boolean {
 }
 
 /**
- * Attach the nearest preceding human request as normal reply context.
- * Prefer the same sender in busy threads and never override an explicit reply.
+ * Attach the nearest unanswered request from the same sender as reply context.
+ * Never borrow another participant's request or override an explicit reply.
  */
 export async function enrichSlackMentionOnlyContext(
   message: InboundMessage,
@@ -121,7 +121,10 @@ export async function enrichSlackMentionOnlyContext(
         ? ((content.author as Record<string, unknown>).userId as string)
         : undefined;
   const currentAt = Date.parse(message.timestamp);
-  const candidates = (await fetchThreadHistory(threadId, 20))
+  if (!currentSenderId) return message;
+
+  const history = await fetchThreadHistory(threadId, 20);
+  const candidates = history
     .filter((entry) => {
       if (entry.id === message.id || !entry.text.trim() || isBareMentionText(entry.text)) return false;
       if (botUserId && entry.senderId === botUserId) return false;
@@ -130,8 +133,24 @@ export async function enrichSlackMentionOnlyContext(
     })
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
 
-  const previous = (currentSenderId && candidates.find((entry) => entry.senderId === currentSenderId)) || candidates[0];
+  const previous = candidates.find((entry) => entry.senderId === currentSenderId);
   if (!previous) return message;
+
+  const previousAt = Date.parse(previous.timestamp);
+  const botAlreadyReplied = Boolean(
+    botUserId &&
+    history.some((entry) => {
+      if (entry.senderId !== botUserId) return false;
+      const at = Date.parse(entry.timestamp);
+      return (
+        Number.isFinite(at) &&
+        Number.isFinite(previousAt) &&
+        at > previousAt &&
+        (!Number.isFinite(currentAt) || at <= currentAt)
+      );
+    }),
+  );
+  if (botAlreadyReplied) return message;
 
   return {
     ...message,

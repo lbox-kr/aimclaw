@@ -109,6 +109,12 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(slack).toContain('공통 높임법 규칙을 유지하면서');
     expect(slack).toContain('공통 상태는 상위에서 한 번');
     expect(slack).toContain('상태를 비교하는 목록에서는 항목마다');
+    expect(slack).toContain('한 응답의 주 출력 형태는 하나만 선택한다');
+    expect(slack).toContain('AimClaw이 플랫폼별 UI로 변환하는 카드 추상화');
+    expect(slack).toContain('자유 형식 설명·날짜·수치·파일');
+    expect(slack).toContain('같은 작성자의 아직 답변되지 않은 명시적 요청');
+    expect(slack).not.toContain('최신 Slack Markdown');
+    expect(slack).not.toContain('약 4,000자');
     expect(productSearch).toContain('commit에 고정된 짧은 코드 링크');
     expect(slackInstructions).not.toContain('명사형 종결');
     expect(slack).not.toContain('commit에 고정된');
