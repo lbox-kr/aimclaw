@@ -107,16 +107,29 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(contract).toContain('기존 구조를 그대로 반복하지 않고');
     expect(contract).toContain('공식 보고서 문체를 요청하지 않았다면');
     expect(slackInstructions).toContain('최종 응답 전에 `/slack-formatting`을 사용한다');
-    expect(slack).toContain('`container/CLAUDE.md`의 공통 높임법 규칙을 유지하면서');
-    expect(slack).toContain('공통 상태는 상위에서 한 번');
-    expect(slack).toContain('상태를 비교하는 목록에서는 항목마다');
-    expect(slack).toContain('빠른 스캔·가독성·접근성');
-    expect(slack).toContain('한 응답에서 핵심 정보를 표현하는 주 형식은 하나만 선택한다');
-    expect(slack).toContain('AimClaw이 플랫폼별 UI로 변환하는 카드 추상화');
-    expect(slack).toContain('자유 형식 설명·날짜·수치·파일');
-    expect(slack).toContain('정책상 명시적 확인이 필요할 때');
-    expect(slack).toContain('상태, 위험, 진행 여부를 빠르게 구분하는 emoji는 장식이 아니라 정보 표현');
-    expect(slack).toContain('사용자가 실제로 접근할 수 있다고 확인된 링크나 경로만');
+    expect(slack).toContain('아래 예시는 복사할 고정 양식이 아니다');
+    expect(slack).toContain('`container/CLAUDE.md`의 친근한 해요체를 유지하고');
+    expect(slack).toContain('공통 상태는 한 번 말하고');
+    expect(slack).toContain('근거는 그 아래 한 단계나 링크·파일로 내린다');
+    expect(slack).toContain('평문 하나를 기본으로 하고, 한 응답의 주 형식은 하나만 선택한다');
+    expect(slack).toContain('카드는 정보를 보여주고 URL 행동만 제공하며');
+    expect(slack).toContain('사용자가 접근할 수 없는 내부 경로는 제시하지 않는다');
+    for (const example of [
+      '### 한 가지 답',
+      '### 후속 코드 검토',
+      '### 모두 같은 상태',
+      '### 상태가 섞인 점검',
+      '### 병렬 영향',
+      '### 설계 선택과 도입 조건',
+      '### 장애 상태와 복구 계층',
+      '### 배포 준비도와 실행 순서',
+      '### UI를 쓰는 경우',
+    ]) {
+      expect(slack).toContain(example);
+    }
+    expect((slack.match(/^  - /gm) ?? []).length).toBeGreaterThanOrEqual(10);
+    expect(slack).not.toContain('- ✅ **결제 webhook**');
+    expect(slack).not.toContain('점검 3건 중 2건은 정상이고');
     expect(slack).not.toContain('진행 reaction');
     expect(slack).not.toContain('## Thread와 mention');
     expect(slack).not.toContain('read_current_thread');
