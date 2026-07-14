@@ -22,6 +22,7 @@ import { resolveThreadPolicy, resolveUnknownSenderPolicy } from './channels/chan
 import { gateCommand } from './command-gate.js';
 import { enableSlackTypingThread, withAimClawSlackDefaults } from './custom/slack-typing.js';
 import { addSlackProcessingReaction } from './custom/slack-processing-reaction.js';
+import { recordActiveRequester } from './custom/request-authority.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
@@ -546,8 +547,9 @@ async function deliverToAgent(
     }
   }
 
+  const messageId = messageIdForAgent(event.message.id, agent.agent_group_id);
   writeSessionMessage(session.agent_group_id, session.id, {
-    id: messageIdForAgent(event.message.id, agent.agent_group_id),
+    id: messageId,
     kind: event.message.kind,
     timestamp: event.message.timestamp,
     platformId: deliveryAddr.platformId,
@@ -556,6 +558,7 @@ async function deliverToAgent(
     content: stampPlatformMessageId(event.message.content, event.message.id),
     trigger: wake ? 1 : 0,
   });
+  if (wake) recordActiveRequester(session.id, agent.agent_group_id, messageId, userId);
 
   log.info('Message routed', {
     sessionId: session.id,

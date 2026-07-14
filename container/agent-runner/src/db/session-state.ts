@@ -18,9 +18,9 @@ function continuationKey(providerName: string): string {
 }
 
 function getValue(key: string): string | undefined {
-  const row = getOutboundDb()
-    .prepare('SELECT value FROM session_state WHERE key = ?')
-    .get(key) as { value: string } | undefined;
+  const row = getOutboundDb().prepare('SELECT value FROM session_state WHERE key = ?').get(key) as
+    | { value: string }
+    | undefined;
   return row?.value;
 }
 
@@ -91,6 +91,7 @@ export function clearContinuation(providerName: string): void {
  * (journal_mode=DELETE + busy_timeout make intra-container access safe).
  */
 const IN_REPLY_TO_KEY = 'current_in_reply_to';
+const REQUEST_MESSAGE_KEY = 'current_request_message_id';
 
 /**
  * Ignore a stamp older than this. The poll loop clears the stamp in a
@@ -120,4 +121,21 @@ export function getCurrentInReplyTo(): string | null {
   const age = Date.now() - new Date(row.updated_at).getTime();
   if (!Number.isFinite(age) || age > IN_REPLY_TO_MAX_AGE_MS) return null;
   return row.value;
+}
+
+/**
+ * Host-authenticated request attribution uses the exact inbound row whose
+ * execution policy is active. The ncl subprocess reads this value and returns
+ * only the message id; the host keeps the associated user identity privately.
+ */
+export function setCurrentRequestMessageId(id: string | null): void {
+  if (id === null) {
+    clearCurrentRequestMessageId();
+    return;
+  }
+  setValue(REQUEST_MESSAGE_KEY, id);
+}
+
+export function clearCurrentRequestMessageId(): void {
+  deleteValue(REQUEST_MESSAGE_KEY);
 }

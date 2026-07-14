@@ -3,13 +3,31 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { getOutboundDb, initTestSessionDb } from './connection.js';
 import {
   clearContinuation,
+  clearCurrentRequestMessageId,
   getContinuation,
   migrateLegacyContinuation,
   setContinuation,
+  setCurrentRequestMessageId,
 } from './session-state.js';
 
 beforeEach(() => {
   initTestSessionDb();
+});
+
+describe('session-state — active request attribution', () => {
+  test('publishes and clears the current request message for the ncl subprocess', () => {
+    setCurrentRequestMessageId('message-1');
+    const current = getOutboundDb()
+      .prepare("SELECT value FROM session_state WHERE key = 'current_request_message_id'")
+      .get() as { value: string };
+    expect(current.value).toBe('message-1');
+
+    clearCurrentRequestMessageId();
+
+    expect(
+      getOutboundDb().prepare("SELECT value FROM session_state WHERE key = 'current_request_message_id'").get(),
+    ).toBeNull();
+  });
 });
 
 function seedLegacy(value: string): void {

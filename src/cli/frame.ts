@@ -47,4 +47,6 @@ export type CallerContext =
       sessionId: string;
       agentGroupId: string;
       messagingGroupId: string;
+      /** Host-resolved sender for the currently active inbound message. */
+      requesterUserId?: string | null;
     };

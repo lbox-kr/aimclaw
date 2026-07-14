@@ -58,6 +58,13 @@ ID와 역할 DB를 확인해 직접 처리하며, 마지막 관리자는 자신�
 @AimClaw 관리자 삭제 @사용자
 ```
 
+### 관리자 작업 승인
+
+호스트 쓰기 작업 중 관리자 승인을 요구하도록 등록된 명령은 현재 요청의 발신자가
+관리자이면 승인 카드 없이 실행한다. 일반 사용자이거나 발신자를 확인할 수 없는
+요청이 해당 경로에 도달하면 기존 관리자 승인 카드를 사용한다. 발신자 신원과 역할은
+모델이나 컨테이너가 전달한 값을 신뢰하지 않고 실행 시점에 호스트에서 확인한다.
+
 ### 일반 사용자 등록
 
 Slack 앱이 받은 사람의 DM·멘션은 해당 에이전트의 일반 사용자로 자동 등록한다.
@@ -182,10 +189,11 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
 
 ## LBox AWS 정적 파일 배포
 
-관리자는 Slack 메시지에 파일을 첨부하고 배포 대상과 함께 요청한다. 봇은 첨부파일을
-호스트 전용 staging에 복사해 SHA-256을 확정한 뒤 관리자 승인 카드를 보낸다. 승인
-후 Mac mini의 AWS CLI로 백업, 업로드, 원격 검증, CloudFront invalidation 완료까지
-처리한다. AWS credential과 `~/.aws`는 컨테이너에 전달하지 않는다.
+이 배포는 위 관리자 작업 승인 정책을 따른다. Slack 메시지에 파일을 첨부하고 배포
+대상과 함께 요청하면 봇이 첨부파일을 호스트 전용 staging에 복사해 SHA-256을
+확정한다. 이후 Mac mini의 AWS CLI로 백업, 업로드, 원격 검증, CloudFront
+invalidation 완료까지 처리한다. AWS credential과 `~/.aws`는 컨테이너에 전달하지
+않는다.
 
 현재 지원 profile은 `lbox-system`이다. SSO가 만료됐다는 응답이 오면 Mac mini에서
 다음 명령으로 로그인한 뒤 같은 Slack 요청을 다시 실행한다.
@@ -197,8 +205,8 @@ aws sso login --profile lbox-system
 허용된 배포 경로는 `container/skills/lbox-aws/references/targets.json`에서 관리한다.
 `lbox-static-html` target은 `public/lbox/static-html/` 아래의 HTML을 지원하며, 기본
 목적지는 첨부파일명이다. 다른 이름으로 배포할 때는 target 범위 안의 상대
-`--destination`만 지정한다. 승인 전 staging 사본과 배포 전 백업은 Git에 포함되지
-않는 `data/team-lbox-aws/` 아래에 저장한다.
+`--destination`만 지정한다. 요청 시 만든 staging 사본과 배포 전 백업은 Git에
+포함되지 않는 `data/team-lbox-aws/` 아래에 저장한다.
 
 ## 코드 참조 저장소
 

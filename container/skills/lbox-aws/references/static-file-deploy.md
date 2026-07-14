@@ -63,7 +63,9 @@ metadata 검증, invalidation 생성과 `Completed` 대기를 순서대로 수�
 
 ## 결과 처리
 
-- 명령이 `approval_requested`를 반환하면 관리자 승인 대기 상태를 사용자에게 알린다.
+- 명령이 `deployment_started`를 반환하면 호스트가 관리자 발신자를 확인해 배포를
+  시작한 상태라고 알린다. `approval_requested`를 반환하면 관리자 승인 대기 상태를
+  알린다.
 - `AWS_SSO_LOGIN_REQUIRED`가 오면 Mac mini에서 메시지에 표시된 profile로
   `aws sso login`을 완료한 뒤 같은 요청을 다시 실행한다.
 - 성공 보고에는 SHA-256 일치, invalidation ID, `Completed`, CDN URL을 포함한다.

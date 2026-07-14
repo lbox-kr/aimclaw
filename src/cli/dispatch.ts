@@ -10,6 +10,7 @@ import { getContainerConfig } from '../db/container-configs.js';
 import { getAgentGroup } from '../db/agent-groups.js';
 import { getSession } from '../db/sessions.js';
 import { registerApprovalHandler, requestApproval } from '../modules/approvals/index.js';
+import { hasAdminPrivilege } from '../modules/permissions/db/user-roles.js';
 import type { CallerContext, ErrorCode, RequestFrame, ResponseFrame } from './frame.js';
 import { localizeIsoTimestamps } from './format.js';
 import { getResource } from './crud.js';
@@ -128,7 +129,10 @@ export async function dispatch(
     return { id: req.id, ok: true, data: helpText, human: helpText };
   }
 
-  if (ctx.caller !== 'host' && cmd.access === 'approval' && !opts.approved) {
+  const administratorRequest =
+    ctx.caller === 'agent' && !!ctx.requesterUserId && hasAdminPrivilege(ctx.requesterUserId, ctx.agentGroupId);
+
+  if (ctx.caller !== 'host' && cmd.access === 'approval' && !opts.approved && !administratorRequest) {
     const session = getSession(ctx.sessionId);
     if (!session) {
       return err(req.id, 'handler-error', 'Session not found.');
@@ -245,6 +249,10 @@ function parseCallerContext(value: unknown): CallerContext | undefined {
       sessionId: record.sessionId,
       agentGroupId: record.agentGroupId,
       messagingGroupId: record.messagingGroupId,
+      requesterUserId:
+        typeof record.requesterUserId === 'string' || record.requesterUserId === null
+          ? record.requesterUserId
+          : undefined,
     };
   }
   return undefined;

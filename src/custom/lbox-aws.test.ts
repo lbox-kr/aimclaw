@@ -2,17 +2,29 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../config.js', async () => {
+  const actual = await vi.importActual<typeof import('../config.js')>('../config.js');
+  return { ...actual, DATA_DIR: '/tmp/aimclaw-test-lbox-aws-data' };
+});
+
+import { closeDb, createAgentGroup, createMessagingGroup, initTestDb, runMigrations } from '../db/index.js';
+import { createUser } from '../modules/permissions/db/users.js';
+import { grantRole } from '../modules/permissions/db/user-roles.js';
+import { resolveSession, sessionDir } from '../session-manager.js';
 
 import {
   executeStaticFileDeployment,
   parseStaticFileDeployRequest,
+  requestStaticFileDeployment,
   resolveSessionAttachment,
   type AwsRunner,
   type StagedStaticFileDeploy,
 } from './lbox-aws.js';
 
 const tempDirs: string[] = [];
+const REQUEST_TEST_DATA = '/tmp/aimclaw-test-lbox-aws-data';
 
 function tempDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aimclaw-lbox-aws-'));
@@ -169,6 +181,72 @@ describe('LBox AWS attachment containment', () => {
 
     expect(resolveSessionAttachment(root, '/workspace/inbox/m1/guide.html')).toBe(fs.realpathSync(file));
     expect(() => resolveSessionAttachment(root, '/workspace/agent/guide.html')).toThrow(/workspace\/inbox/);
+  });
+});
+
+describe('LBox AWS request authorization', () => {
+  beforeEach(() => {
+    fs.rmSync(REQUEST_TEST_DATA, { recursive: true, force: true });
+    const db = initTestDb();
+    runMigrations(db);
+    createAgentGroup({
+      id: 'ag-1',
+      name: '에이미',
+      folder: 'aimy',
+      agent_provider: null,
+      created_at: new Date().toISOString(),
+    });
+    createMessagingGroup({
+      id: 'mg-1',
+      channel_type: 'slack',
+      platform_id: 'D1',
+      instance: 'slack',
+      name: '관리자 DM',
+      is_group: 0,
+      unknown_sender_policy: 'strict',
+      denied_at: null,
+      created_at: new Date().toISOString(),
+    });
+    createUser({ id: 'slack:UADMIN', kind: 'slack', display_name: '관리자', created_at: new Date().toISOString() });
+    grantRole({
+      user_id: 'slack:UADMIN',
+      role: 'admin',
+      agent_group_id: null,
+      granted_by: null,
+      granted_at: new Date().toISOString(),
+    });
+  });
+
+  afterEach(() => {
+    closeDb();
+    fs.rmSync(REQUEST_TEST_DATA, { recursive: true, force: true });
+  });
+
+  it('starts deployment without an approval card for a host-attributed administrator', async () => {
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    const inbox = path.join(sessionDir('ag-1', session.id), 'inbox', 'message-1');
+    fs.mkdirSync(inbox, { recursive: true });
+    fs.writeFileSync(path.join(inbox, 'guide.html'), '<!doctype html><title>guide</title>');
+    const applyDeployment = vi.fn().mockResolvedValue(undefined);
+
+    const result = await requestStaticFileDeployment(
+      parseStaticFileDeployRequest({
+        target: 'lbox-static-html',
+        attachment: '/workspace/inbox/message-1/guide.html',
+      }),
+      {
+        caller: 'agent',
+        sessionId: session.id,
+        agentGroupId: 'ag-1',
+        messagingGroupId: 'mg-1',
+        requesterUserId: 'slack:UADMIN',
+      },
+      applyDeployment,
+    );
+
+    expect(result.state).toBe('deployment_started');
+    expect(applyDeployment).toHaveBeenCalledTimes(1);
+    expect(applyDeployment.mock.calls[0][0]).toMatchObject({ userId: 'slack:UADMIN' });
   });
 });
 

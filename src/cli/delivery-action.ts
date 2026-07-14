@@ -5,19 +5,19 @@
  * the delivery poll picks it up and calls this handler. We dispatch
  * the command and write the response back to inbound.db.
  */
-import type Database from 'better-sqlite3';
 
 import { registerDeliveryAction } from '../delivery.js';
+import { resolveActiveRequester } from '../custom/request-authority.js';
 import { insertMessage } from '../db/session-db.js';
 import { log } from '../log.js';
 import { dispatch } from './dispatch.js';
 import type { RequestFrame } from './frame.js';
-import type { Session } from '../types.js';
 
 registerDeliveryAction('cli_request', async (content, session, inDb) => {
   const requestId = content.requestId as string;
   const command = content.command as string;
   const args = (content.args as Record<string, unknown>) ?? {};
+  const requestMessageId = typeof content.requestMessageId === 'string' ? content.requestMessageId : null;
 
   if (!requestId || !command) {
     log.warn('cli_request missing requestId or command', { sessionId: session.id });
@@ -30,6 +30,7 @@ registerDeliveryAction('cli_request', async (content, session, inDb) => {
     sessionId: session.id,
     agentGroupId: session.agent_group_id,
     messagingGroupId: session.messaging_group_id ?? '',
+    requesterUserId: resolveActiveRequester(session.id, session.agent_group_id, requestMessageId),
   };
 
   log.info('CLI request from agent', { requestId, command, sessionId: session.id });

@@ -12,9 +12,11 @@ import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
   clearContinuation,
   clearCurrentInReplyTo,
+  clearCurrentRequestMessageId,
   migrateLegacyContinuation,
   setContinuation,
   setCurrentInReplyTo,
+  setCurrentRequestMessageId,
 } from './db/session-state.js';
 import {
   formatMessages,
@@ -238,7 +240,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
-    setExecutionPolicyForMessages(keep);
+    setCurrentRequestMessageId(setExecutionPolicyForMessages(keep));
     const query = config.provider.query({
       prompt,
       continuation,
@@ -290,6 +292,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       });
     } finally {
       clearCurrentInReplyTo();
+      clearCurrentRequestMessageId();
     }
 
     // Ensure completed even if processQuery ended without a result event
@@ -433,7 +436,7 @@ export async function processQuery(
         const prompt = formatMessages(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
-        setExecutionPolicyForMessages(keep);
+        setCurrentRequestMessageId(setExecutionPolicyForMessages(keep));
         query.push(prompt);
         archivePrompts.push(prompt);
         markCompleted(keptIds);
@@ -478,11 +481,7 @@ export async function processQuery(
   try {
     for await (const event of query.events) {
       handleEvent(event, routing);
-      if (
-        event.type === 'task_update' &&
-        routing.channelType === 'slack' &&
-        routing.platformId
-      ) {
+      if (event.type === 'task_update' && routing.channelType === 'slack' && routing.platformId) {
         nativeStreamActive = true;
       }
       touchHeartbeat();
