@@ -97,9 +97,37 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(welcome).toContain('질문이나 작업을 이미 요청했다면 환영 절차를 실행하지 않고');
   });
 
-  it('keeps Slack conversation matching subordinate to the shared honorific rule', () => {
-    const skill = read('container/skills/slack-formatting/SKILL.md');
-    expect(skill).toContain('공통 높임법 규칙을 유지하면서');
+  it('keeps response-style responsibilities in their owning prompt layer', () => {
+    const contract = read('container/CLAUDE.md');
+    const slack = read('container/skills/slack-formatting/SKILL.md');
+    const slackInstructions = read('container/skills/slack-formatting/instructions.md');
+    const currentThread = read('container/agent-runner/src/mcp-tools/current-thread.ts');
+    const productSearch = read('container/skills/lbox-product-code-search/SKILL.md');
+
+    expect(contract).toContain('기존 구조를 그대로 반복하지 않고');
+    expect(contract).toContain('공식 보고서 문체를 요청하지 않았다면');
+    expect(slackInstructions).toContain('최종 응답 전에 `/slack-formatting`을 사용한다');
+    expect(slack).toContain('`container/CLAUDE.md`의 공통 높임법 규칙을 유지하면서');
+    expect(slack).toContain('공통 상태는 상위에서 한 번');
+    expect(slack).toContain('상태를 비교하는 목록에서는 항목마다');
+    expect(slack).toContain('빠른 스캔·가독성·접근성');
+    expect(slack).toContain('한 응답에서 핵심 정보를 표현하는 주 형식은 하나만 선택한다');
+    expect(slack).toContain('AimClaw이 플랫폼별 UI로 변환하는 카드 추상화');
+    expect(slack).toContain('자유 형식 설명·날짜·수치·파일');
+    expect(slack).toContain('정책상 명시적 확인이 필요할 때');
+    expect(slack).toContain('상태, 위험, 진행 여부를 빠르게 구분하는 emoji는 장식이 아니라 정보 표현');
+    expect(slack).toContain('사용자가 실제로 접근할 수 있다고 확인된 링크나 경로만');
+    expect(slack).not.toContain('진행 reaction');
+    expect(slack).not.toContain('## Thread와 mention');
+    expect(slack).not.toContain('read_current_thread');
+    expect(slackInstructions).not.toContain('read_current_thread');
+    expect(currentThread).toContain('같은 작성자의 아직 답변되지 않은 명시적 요청');
+    expect(slack).not.toContain('최신 Slack Markdown');
+    expect(slack).not.toContain('약 4,000자');
+    expect(productSearch).toContain('commit에 고정된 짧은 코드 링크');
+    expect(slackInstructions).not.toContain('명사형 종결');
+    expect(slack).not.toContain('commit에 고정된');
+    expect(productSearch).not.toContain('공통 상태');
   });
 
   for (const file of ['scripts/init-first-agent.ts', 'scripts/init-cli-agent.ts']) {
