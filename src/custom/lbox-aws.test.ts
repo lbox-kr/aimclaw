@@ -59,9 +59,14 @@ function stagedRequest(root: string): StagedStaticFileDeploy {
   };
 }
 
-function fakeAws(initialRemote: Buffer, metadata = { ContentType: 'text/html', ServerSideEncryption: 'AES256' }) {
-  let remote = Buffer.from(initialRemote);
+function fakeAws(
+  initialRemote: Buffer | null,
+  metadata = { ContentType: 'text/html', ServerSideEncryption: 'AES256' },
+) {
+  let remote: Buffer | null = initialRemote === null ? null : Buffer.from(initialRemote);
   const calls: string[][] = [];
+  const notFound = () =>
+    new Error('fatal error: An error occurred (404) when calling the HeadObject operation: Not Found');
   const runner: AwsRunner = async (args) => {
     calls.push(args);
     const command = args.slice(2);
@@ -69,11 +74,20 @@ function fakeAws(initialRemote: Buffer, metadata = { ContentType: 'text/html', S
     if (command[0] === 's3' && command[1] === 'cp') {
       const source = command[2];
       const destination = command[3];
-      if (source.startsWith('s3://')) fs.writeFileSync(destination, remote);
-      else if (destination.startsWith('s3://')) remote = fs.readFileSync(source);
+      if (source.startsWith('s3://')) {
+        if (remote === null) throw notFound();
+        fs.writeFileSync(destination, remote);
+      } else if (destination.startsWith('s3://')) remote = fs.readFileSync(source);
       return '';
     }
-    if (command[0] === 's3api') return JSON.stringify(metadata);
+    if (command[0] === 's3' && command[1] === 'rm') {
+      remote = null;
+      return '';
+    }
+    if (command[0] === 's3api') {
+      if (remote === null) throw notFound();
+      return JSON.stringify(metadata);
+    }
     if (command[0] === 'cloudfront' && command[1] === 'create-invalidation') {
       return JSON.stringify({ Invalidation: { Id: 'I123' } });
     }
@@ -270,12 +284,45 @@ describe('LBox AWS static-file deployment', () => {
     expect(aws.remote()).toEqual(fs.readFileSync(request.stagedPath));
 
     const commands = aws.calls.map((args) => args.slice(2));
-    expect(commands[1].slice(0, 3)).toEqual(['s3', 'cp', request.s3Uri]);
-    expect(commands[2]).toContain('--content-type');
-    expect(commands[2]).toContain('--sse');
+    expect(commands[1].slice(0, 2)).toEqual(['s3api', 'head-object']);
+    expect(commands[2].slice(0, 3)).toEqual(['s3', 'cp', request.s3Uri]);
+    expect(commands[3]).toContain('--content-type');
+    expect(commands[3]).toContain('--sse');
     expect(commands.some((args) => args[0] === 's3api' && args[1] === 'head-object')).toBe(true);
     expect(commands.some((args) => args[0] === 'cloudfront' && args[1] === 'wait')).toBe(true);
     expect(aws.calls.every((args) => args[0] === '--profile' && args[1] === 'lbox-system')).toBe(true);
+  });
+
+  it('uploads a brand-new key without a prior object and skips the backup', async () => {
+    const root = tempDir();
+    const request = stagedRequest(root);
+    const aws = fakeAws(null);
+
+    const result = await executeStaticFileDeployment(request, aws.runner, path.join(root, 'backups'));
+
+    expect(result).toMatchObject({ uploadVerified: true, invalidationStatus: 'Completed', backupPath: '' });
+    expect(aws.remote()).toEqual(fs.readFileSync(request.stagedPath));
+
+    const commands = aws.calls.map((args) => args.slice(2));
+    const firstUpload = commands.findIndex((c) => c[0] === 's3' && c[1] === 'cp' && String(c[3]).startsWith('s3://'));
+    const backupBeforeUpload = commands
+      .slice(0, firstUpload)
+      .some((c) => c[0] === 's3' && c[1] === 'cp' && String(c[2]).startsWith('s3://'));
+    expect(backupBeforeUpload).toBe(false);
+  });
+
+  it('removes the freshly uploaded object when a new-key deploy fails verification', async () => {
+    const root = tempDir();
+    const request = stagedRequest(root);
+    const aws = fakeAws(null, { ContentType: 'text/plain', ServerSideEncryption: 'AES256' });
+
+    await expect(executeStaticFileDeployment(request, aws.runner, path.join(root, 'backups'))).rejects.toThrow(
+      /metadata mismatch; upload removed/,
+    );
+
+    expect(aws.remote()).toBeNull();
+    expect(aws.calls.some((args) => args[2] === 's3' && args[3] === 'rm')).toBe(true);
+    expect(aws.calls.some((args) => args.includes('create-invalidation'))).toBe(false);
   });
 
   it('restores the backup when uploaded metadata does not match', async () => {

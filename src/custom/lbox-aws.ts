@@ -413,6 +413,46 @@ async function restoreBackup(request: StagedStaticFileDeploy, backupPath: string
   ]);
 }
 
+// Does the target key already exist? A brand-new upload has no prior object, so
+// HeadObject returns 404 — that is expected, not a failure. Any other error
+// (access denied, network, throttling) is real and must propagate.
+async function remoteObjectExists(
+  profileArgs: string[],
+  bucket: string,
+  key: string,
+  runner: AwsRunner,
+): Promise<boolean> {
+  try {
+    await runner([...profileArgs, 's3api', 'head-object', '--bucket', bucket, '--key', key, '--output', 'json']);
+    return true;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (/\(404\)|not found|nosuchkey|does not exist/i.test(detail)) return false;
+    throw error;
+  }
+}
+
+// Undo a failed verification. If a prior object was backed up, restore it; if
+// the key was brand-new there is nothing to restore, so best-effort delete the
+// object we just uploaded and let the caller surface the original error.
+async function rollback(
+  request: StagedStaticFileDeploy,
+  hadPrevious: boolean,
+  backupPath: string,
+  runner: AwsRunner,
+): Promise<void> {
+  if (hadPrevious) {
+    await restoreBackup(request, backupPath, runner);
+    return;
+  }
+  try {
+    await runner(['--profile', request.profile, 's3', 'rm', request.s3Uri, '--only-show-errors']);
+  } catch {
+    // Deleting the just-uploaded object is best-effort; the primary
+    // verification error is what the caller reports.
+  }
+}
+
 export async function executeStaticFileDeployment(
   request: StagedStaticFileDeploy,
   runner: AwsRunner = runAws,
@@ -437,11 +477,18 @@ export async function executeStaticFileDeployment(
   ).replace(/[^a-z0-9-]/gi, '-');
   const backupDir = path.join(backupRoot, safeTarget);
   fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
-  const backupPath = path.join(backupDir, `${timestampForFilename()}-${request.deploymentId}-${request.originalName}`);
   const downloadedPath = path.join(path.dirname(request.stagedPath), 'remote-download');
   const profile = ['--profile', request.profile];
+  const { bucket, key } = parseS3Uri(request.s3Uri);
 
-  await runner([...profile, 's3', 'cp', request.s3Uri, backupPath, '--only-show-errors']);
+  // Back up the existing object only when one exists. A new key legitimately
+  // has no prior object, so skip the backup instead of failing on its 404.
+  const hadPrevious = await remoteObjectExists(profile, bucket, key, runner);
+  let backupPath = '';
+  if (hadPrevious) {
+    backupPath = path.join(backupDir, `${timestampForFilename()}-${request.deploymentId}-${request.originalName}`);
+    await runner([...profile, 's3', 'cp', request.s3Uri, backupPath, '--only-show-errors']);
+  }
   await runner([
     ...profile,
     's3',
@@ -458,17 +505,18 @@ export async function executeStaticFileDeployment(
 
   const downloadedSha256 = sha256File(downloadedPath);
   if (downloadedSha256 !== request.sourceSha256) {
-    await restoreBackup(request, backupPath, runner);
-    throw new Error(`remote SHA-256 mismatch; previous object restored (${downloadedSha256})`);
+    await rollback(request, hadPrevious, backupPath, runner);
+    throw new Error(
+      `remote SHA-256 mismatch; ${hadPrevious ? 'previous object restored' : 'upload removed'} (${downloadedSha256})`,
+    );
   }
 
-  const { bucket, key } = parseS3Uri(request.s3Uri);
   const head = JSON.parse(
     await runner([...profile, 's3api', 'head-object', '--bucket', bucket, '--key', key, '--output', 'json']),
   ) as { ContentType?: string; ServerSideEncryption?: string };
   if (head.ContentType !== request.contentType || head.ServerSideEncryption !== request.sse) {
-    await restoreBackup(request, backupPath, runner);
-    throw new Error('remote metadata mismatch; previous object restored');
+    await rollback(request, hadPrevious, backupPath, runner);
+    throw new Error(`remote metadata mismatch; ${hadPrevious ? 'previous object restored' : 'upload removed'}`);
   }
 
   const created = JSON.parse(
