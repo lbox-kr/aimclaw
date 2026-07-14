@@ -114,8 +114,15 @@ describe('request authorization', () => {
     expect(member).toMatchObject({
       role: 'member',
       allowedTools: ['WebSearch', 'WebFetch', 'mcp__nanoclaw__read_current_thread'],
-      allowedCommands: [],
-      skillTools: {},
+      allowedCommands: ['/slack-formatting'],
+      skillTools: {
+        'slack-formatting': [
+          'Skill',
+          'mcp__nanoclaw__ask_user_question',
+          'mcp__nanoclaw__send_card',
+          'mcp__nanoclaw__set_status',
+        ],
+      },
     });
   });
 

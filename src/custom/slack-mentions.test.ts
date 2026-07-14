@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Adapter, Message as ChatMessage } from 'chat';
 
-import { collectSlackInlineMentions } from './slack-mentions.js';
+import type { InboundMessage, ThreadHistoryMessage } from '../channels/adapter.js';
+import { collectSlackInlineMentions, enrichSlackMentionOnlyContext, isSlackMentionOnly } from './slack-mentions.js';
 
 describe('collectSlackInlineMentions', () => {
   it('maps self and user mentions to their exact positions', async () => {
@@ -50,5 +51,93 @@ describe('collectSlackInlineMentions', () => {
 
     await expect(collectSlackInlineMentions(adapter, message)).resolves.toEqual([]);
     expect(getUser).not.toHaveBeenCalled();
+  });
+});
+
+function inbound(text: string, overrides: Partial<InboundMessage> = {}): InboundMessage {
+  return {
+    id: 'm-current',
+    kind: 'chat-sdk',
+    timestamp: '2026-07-14T04:00:00.000Z',
+    isMention: true,
+    isGroup: true,
+    content: {
+      text,
+      senderId: 'U-CURRENT',
+      inlineMentions: [{ id: 'U-BOT', name: '에이미', target: 'self', start: 0, end: 4 }],
+    },
+    ...overrides,
+  };
+}
+
+describe('Slack mention-only context', () => {
+  it('recognizes a self mention without request text', () => {
+    expect(isSlackMentionOnly(inbound('@에이미'))).toBe(true);
+    expect(isSlackMentionOnly(inbound('@에이미, 질문이 있어요'))).toBe(false);
+  });
+
+  it('attaches the nearest prior request from the same sender', async () => {
+    const history: ThreadHistoryMessage[] = [
+      {
+        id: 'm-current',
+        sender: '정현수',
+        senderId: 'U-CURRENT',
+        text: '@에이미',
+        timestamp: '2026-07-14T04:00:00.000Z',
+      },
+      {
+        id: 'm-bot',
+        sender: '에이미',
+        senderId: 'U-BOT',
+        text: '네, 말씀하세요.',
+        timestamp: '2026-07-14T03:59:50.000Z',
+      },
+      {
+        id: 'm-other',
+        sender: '다른 팀원',
+        senderId: 'U-OTHER',
+        text: '이 메시지가 더 최근이에요.',
+        timestamp: '2026-07-14T03:59:40.000Z',
+      },
+      {
+        id: 'm-question',
+        sender: '정현수',
+        senderId: 'U-CURRENT',
+        text: 'FE 코드와 관련된 부분이 있는가? 위치는?',
+        timestamp: '2026-07-14T03:59:30.000Z',
+      },
+    ];
+    const fetchHistory = vi.fn(async () => history);
+
+    const result = await enrichSlackMentionOnlyContext(inbound('@에이미'), 'slack:C1:thread', 'U-BOT', fetchHistory);
+
+    expect(fetchHistory).toHaveBeenCalledWith('slack:C1:thread', 20);
+    expect(result.content).toMatchObject({
+      replyTo: {
+        id: 'm-question',
+        sender: '정현수',
+        text: 'FE 코드와 관련된 부분이 있는가? 위치는?',
+      },
+    });
+  });
+
+  it('does not fetch when the mention includes a request or already replies to a message', async () => {
+    const fetchHistory = vi.fn(async () => []);
+    const withRequest = await enrichSlackMentionOnlyContext(
+      inbound('@에이미 코드 위치를 찾아줘'),
+      'slack:C1:thread',
+      'U-BOT',
+      fetchHistory,
+    );
+    const withReply = await enrichSlackMentionOnlyContext(
+      inbound('@에이미', { content: { ...(inbound('@에이미').content as object), replyTo: { id: 'm1' } } }),
+      'slack:C1:thread',
+      'U-BOT',
+      fetchHistory,
+    );
+
+    expect(withRequest).toEqual(inbound('@에이미 코드 위치를 찾아줘'));
+    expect(withReply.content).toMatchObject({ replyTo: { id: 'm1' } });
+    expect(fetchHistory).not.toHaveBeenCalled();
   });
 });
