@@ -365,7 +365,15 @@ export async function requestStaticFileDeployment(
 }
 
 function resolveAwsCli(): string {
-  for (const candidate of ['/opt/homebrew/bin/aws', '/usr/local/bin/aws', '/usr/bin/aws']) {
+  // Prefer the self-contained official AWS CLI bundle (`/usr/local/bin/aws` on
+  // macOS) over the Homebrew build. Homebrew's `aws` runs on Homebrew's
+  // `python@3.14`, whose `pyexpat` dynamically links the macOS *system*
+  // libexpat; when the system libexpat is older than the one the bottle was
+  // built against, every XML-parsing call (i.e. every S3 request) dies with a
+  // `Symbol not found: _XML_SetAllocTrackerActivationThreshold` dlopen error.
+  // The official installer statically links expat and is immune to that drift,
+  // so it must win the resolution order.
+  for (const candidate of ['/usr/local/bin/aws', '/opt/homebrew/bin/aws', '/usr/bin/aws']) {
     if (fs.existsSync(candidate)) return candidate;
   }
   throw new Error('AWS CLI v2 is not installed on the Mac host');
