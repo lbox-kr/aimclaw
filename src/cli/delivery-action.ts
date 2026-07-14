@@ -30,7 +30,7 @@ registerDeliveryAction('cli_request', async (content, session, inDb) => {
     sessionId: session.id,
     agentGroupId: session.agent_group_id,
     messagingGroupId: session.messaging_group_id ?? '',
-    requesterUserId: resolveActiveRequester(session.id, session.agent_group_id, requestMessageId),
+    requesterUserId: resolveActiveRequester(session.id, requestMessageId),
   };
 
   log.info('CLI request from agent', { requestId, command, sessionId: session.id });

@@ -558,7 +558,7 @@ async function deliverToAgent(
     content: stampPlatformMessageId(event.message.content, event.message.id),
     trigger: wake ? 1 : 0,
   });
-  if (wake) recordActiveRequester(session.id, agent.agent_group_id, messageId, userId);
+  if (wake) recordActiveRequester(session.id, messageId, userId);
 
   log.info('Message routed', {
     sessionId: session.id,

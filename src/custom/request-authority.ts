@@ -10,7 +10,6 @@
 const AUTHORITY_TTL_MS = 15 * 60 * 1000;
 
 interface ActiveRequestAuthority {
-  agentGroupId: string;
   messageId: string;
   userId: string | null;
   expiresAt: number;
@@ -18,25 +17,15 @@ interface ActiveRequestAuthority {
 
 const activeBySession = new Map<string, ActiveRequestAuthority>();
 
-export function recordActiveRequester(
-  sessionId: string,
-  agentGroupId: string,
-  messageId: string,
-  userId: string | null,
-): void {
+export function recordActiveRequester(sessionId: string, messageId: string, userId: string | null): void {
   activeBySession.set(sessionId, {
-    agentGroupId,
     messageId,
     userId,
     expiresAt: Date.now() + AUTHORITY_TTL_MS,
   });
 }
 
-export function resolveActiveRequester(
-  sessionId: string,
-  agentGroupId: string,
-  messageId: string | null,
-): string | null {
+export function resolveActiveRequester(sessionId: string, messageId: string | null): string | null {
   if (!messageId) return null;
   const active = activeBySession.get(sessionId);
   if (!active) return null;
@@ -44,10 +33,6 @@ export function resolveActiveRequester(
     activeBySession.delete(sessionId);
     return null;
   }
-  if (active.agentGroupId !== agentGroupId || active.messageId !== messageId) return null;
+  if (active.messageId !== messageId) return null;
   return active.userId;
-}
-
-export function clearActiveRequester(sessionId: string): void {
-  activeBySession.delete(sessionId);
 }
