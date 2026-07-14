@@ -88,27 +88,36 @@ interface SDKUserMessage {
 const DEEP_REASONER = 'deep-reasoner';
 const DEEP_REASONING_STATUS = '조금 더 깊이 고민하고 있어요';
 const DEEP_REASONING_COMPLETE_STATUS = '고민한 내용을 정리하고 있어요';
-const LONG_TOOL_SECONDS = 4;
+const LONG_TOOL_SECONDS = 10;
 
 interface ClaudeProgressState {
   tasks: Map<string, string>;
+  pendingTasks: Map<string, string>;
   taskAliases: Map<string, string>;
   deepToolIds: Set<string>;
   deepTasks: Map<string, string | undefined>;
 }
 
-function taskTitle(toolName: string, input: unknown, includeSlowFallback = false): string | null {
+function taskTitle(toolName: string, input: unknown): string | null {
   const name = toolName.toLowerCase();
   const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
 
-  if (name === 'task' || name === 'agent') {
-    const subtype = String(args.subagent_type ?? args.agent_type ?? '');
-    return subtype === DEEP_REASONER ? '조금 더 깊이 검토하기' : '작업 나누어 확인하기';
-  }
+  // Delegation is an internal implementation detail. Deep review already has
+  // a native status, and ordinary delegation should not leave a large card.
+  if (name === 'task' || name === 'agent') return null;
   if (name === 'websearch') return '관련 자료 찾기';
   if (name === 'webfetch') return '자료 내용 확인하기';
   if (name.startsWith('mcp__')) {
-    if (name.includes('set_status') || name.includes('send_message') || name.includes('send_file')) return null;
+    if (
+      name.includes('set_status') ||
+      name.includes('send_message') ||
+      name.includes('send_file') ||
+      name.includes('send_card') ||
+      name.includes('ask_user_question') ||
+      name.includes('read_current_thread')
+    ) {
+      return null;
+    }
     if (name.includes('install') || name.includes('package')) return '환경 준비하기';
     if (name.includes('jira') || name.includes('atlassian')) return 'Jira 확인하기';
     if (!name.startsWith('mcp__nanoclaw__')) return '외부 서비스 확인하기';
@@ -120,12 +129,9 @@ function taskTitle(toolName: string, input: unknown, includeSlowFallback = false
     if (/\b(install|add)\b/.test(command) && /\b(pnpm|npm|bun|apt|brew)\b/.test(command)) {
       return '환경 준비하기';
     }
-    return includeSlowFallback ? '작업 실행하기' : null;
+    return null;
   }
-  if (!includeSlowFallback) return null;
-  if (name === 'read' || name === 'grep' || name === 'glob') return '자료 살펴보기';
-  if (name === 'taskoutput') return '작업 결과 기다리기';
-  return '작업 처리하기';
+  return null;
 }
 
 function startTask(state: ClaudeProgressState, id: string, title: string): ProviderTaskUpdate[] {
@@ -139,11 +145,13 @@ function startTask(state: ClaudeProgressState, id: string, title: string): Provi
 function finishTask(state: ClaudeProgressState, id: string, failed: boolean): ProviderTaskUpdate[] {
   const resolvedId = state.taskAliases.get(id) ?? id.slice(0, 100);
   const title = state.tasks.get(resolvedId);
-  if (!title) return [];
+  state.pendingTasks.delete(resolvedId);
+  state.pendingTasks.delete(id);
   state.tasks.delete(resolvedId);
   for (const [taskId, alias] of state.taskAliases) {
     if (alias === resolvedId) state.taskAliases.delete(taskId);
   }
+  if (!title) return [];
   return [{ id: resolvedId, title, status: failed ? 'error' : 'complete' }];
 }
 
@@ -195,6 +203,7 @@ export function getClaudeProgressUpdates(
       })),
     );
     state.tasks.clear();
+    state.pendingTasks.clear();
     state.taskAliases.clear();
   } else if (sdkMessage.type === 'assistant') {
     if (sdkMessage.subagent_type === DEEP_REASONER) status = DEEP_REASONING_STATUS;
@@ -213,7 +222,7 @@ export function getClaudeProgressUpdates(
           status = DEEP_REASONING_STATUS;
         }
         const title = taskTitle(tool.name, tool.input);
-        if (title) tasks.push(...startTask(state, tool.id, title));
+        if (title) state.pendingTasks.set(tool.id.slice(0, 100), title.slice(0, 80));
       }
     }
   } else if (sdkMessage.type === 'tool_progress') {
@@ -223,7 +232,9 @@ export function getClaudeProgressUpdates(
       !sdkMessage.parent_tool_use_id &&
       (sdkMessage.elapsed_time_seconds ?? 0) >= LONG_TOOL_SECONDS
     ) {
-      const title = taskTitle(sdkMessage.tool_name, undefined, true);
+      const safeId = sdkMessage.tool_use_id.slice(0, 100);
+      const title = state.pendingTasks.get(safeId);
+      state.pendingTasks.delete(safeId);
       if (title) tasks.push(...startTask(state, sdkMessage.tool_use_id, title));
     }
   } else if (sdkMessage.type === 'user') {
@@ -246,13 +257,6 @@ export function getClaudeProgressUpdates(
       const displayId =
         state.taskAliases.get(sdkMessage.task_id) ?? (sdkMessage.tool_use_id ?? sdkMessage.task_id).slice(0, 100);
       state.taskAliases.set(sdkMessage.task_id, displayId);
-      tasks.push(
-        ...startTask(
-          state,
-          displayId,
-          sdkMessage.subagent_type === DEEP_REASONER ? '조금 더 깊이 검토하기' : '작업 나누어 확인하기',
-        ),
-      );
       if (
         sdkMessage.subagent_type === DEEP_REASONER ||
         (sdkMessage.subtype === 'task_progress' && state.deepTasks.has(sdkMessage.task_id))
@@ -658,6 +662,7 @@ export class ClaudeProvider implements AgentProvider {
       let lastWorkingStatus: string | null = null;
       const progressState: ClaudeProgressState = {
         tasks: new Map(),
+        pendingTasks: new Map(),
         taskAliases: new Map(),
         deepToolIds: new Set(),
         deepTasks: new Map(),

@@ -19,6 +19,8 @@ description: LBox 기능의 구현 위치를 찾거나 UI·API 동작, 제품 �
    - 권한: 서버 web config → IAM/Keycloak → OPA policy
 5. 코드로 부족할 때만 필요한 API나 운영 상태를 확인한다. 인증은 OneCLI를 사용하고 credential·쿠키를 출력하거나 영구 저장하지 않는다.
 6. 확인한 사실과 추정을 구분해 관련 파일·symbol, 동작 흐름, 원인과 다음 지점을 답한다.
+   Slack에서는 최종 응답을 작성하기 전에 `/slack-formatting`을 사용해 결론,
+   확인 기준 commit, 짧은 상대 경로와 코드 링크를 우선 배치한다.
 
 ## 저장소 지도
 

@@ -1,5 +1,7 @@
 import type { Adapter, Message as ChatMessage } from 'chat';
 
+import type { InboundMessage, ThreadHistoryMessage } from '../channels/adapter.js';
+
 export interface InlineMention {
   id: string;
   name: string;
@@ -56,4 +58,86 @@ export async function collectSlackInlineMentions(adapter: Adapter, message: Chat
   }
 
   return mentions;
+}
+
+type ThreadHistoryFetcher = (threadId: string, limit: number) => Promise<ThreadHistoryMessage[]>;
+
+function contentRecord(message: InboundMessage): Record<string, unknown> | null {
+  return message.content && typeof message.content === 'object' ? (message.content as Record<string, unknown>) : null;
+}
+
+/** A platform-confirmed self mention with no request text needs the preceding thread request. */
+export function isSlackMentionOnly(message: InboundMessage): boolean {
+  if (message.isMention !== true || message.isGroup !== true) return false;
+  const content = contentRecord(message);
+  const text = typeof content?.text === 'string' ? content.text : '';
+  if (!text) return false;
+
+  const mentions = Array.isArray(content?.inlineMentions)
+    ? (content.inlineMentions as Array<Partial<InlineMention>>)
+        .filter(
+          (mention) =>
+            mention?.target === 'self' &&
+            Number.isInteger(mention.start) &&
+            Number.isInteger(mention.end) &&
+            (mention.start as number) >= 0 &&
+            (mention.end as number) <= text.length &&
+            (mention.end as number) > (mention.start as number),
+        )
+        .sort((a, b) => (b.start as number) - (a.start as number))
+    : [];
+  if (mentions.length === 0) return false;
+
+  let remainder = text;
+  for (const mention of mentions) {
+    remainder = remainder.slice(0, mention.start as number) + remainder.slice(mention.end as number);
+  }
+  return remainder.replace(/[\s!?.,~…]+/gu, '') === '';
+}
+
+function isBareMentionText(text: string): boolean {
+  return /^(?:<@[A-Z0-9_]+(?:\|[^<>]+)?>|@\S+)[\s!?.,~…]*$/u.test(text.trim());
+}
+
+/**
+ * Attach the nearest preceding human request as normal reply context.
+ * Prefer the same sender in busy threads and never override an explicit reply.
+ */
+export async function enrichSlackMentionOnlyContext(
+  message: InboundMessage,
+  threadId: string | null,
+  botUserId: string | undefined,
+  fetchThreadHistory: ThreadHistoryFetcher,
+): Promise<InboundMessage> {
+  const content = contentRecord(message);
+  if (!threadId || !content || content.replyTo || !isSlackMentionOnly(message)) return message;
+
+  const currentSenderId =
+    typeof content.senderId === 'string'
+      ? content.senderId
+      : content.author &&
+          typeof content.author === 'object' &&
+          typeof (content.author as Record<string, unknown>).userId === 'string'
+        ? ((content.author as Record<string, unknown>).userId as string)
+        : undefined;
+  const currentAt = Date.parse(message.timestamp);
+  const candidates = (await fetchThreadHistory(threadId, 20))
+    .filter((entry) => {
+      if (entry.id === message.id || !entry.text.trim() || isBareMentionText(entry.text)) return false;
+      if (botUserId && entry.senderId === botUserId) return false;
+      const at = Date.parse(entry.timestamp);
+      return !Number.isFinite(currentAt) || !Number.isFinite(at) || at <= currentAt;
+    })
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+
+  const previous = (currentSenderId && candidates.find((entry) => entry.senderId === currentSenderId)) || candidates[0];
+  if (!previous) return message;
+
+  return {
+    ...message,
+    content: {
+      ...content,
+      replyTo: { id: previous.id, sender: previous.sender, text: previous.text },
+    },
+  };
 }

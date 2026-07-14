@@ -9,6 +9,8 @@ import { createSlackAdapter } from '@chat-adapter/slack';
 import type { Message as ChatMessage } from 'chat';
 
 import { readEnvFile } from '../env.js';
+import { log } from '../log.js';
+import { enrichSlackMentionOnlyContext } from '../custom/slack-mentions.js';
 import type { ChannelDefaults, InboundMessage, NativeStreamContext } from './adapter.js';
 import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
@@ -101,8 +103,23 @@ registerChannelAdapter('slack', {
     bridge.setup = (hostConfig) =>
       setupBridge({
         ...hostConfig,
-        onInbound: (platformId, threadId, message) =>
-          hostConfig.onInbound(platformId, anchorSlackRootDm(threadId, message), message),
+        onInbound: async (platformId, threadId, message) => {
+          const anchoredThreadId = anchorSlackRootDm(threadId, message);
+          let inbound = message;
+          if (bridge.fetchThreadMessages) {
+            try {
+              inbound = await enrichSlackMentionOnlyContext(
+                message,
+                anchoredThreadId,
+                slackAdapter.botUserId,
+                bridge.fetchThreadMessages.bind(bridge),
+              );
+            } catch (err) {
+              log.warn('Failed to enrich Slack mention-only context', { threadId: anchoredThreadId, err });
+            }
+          }
+          await hostConfig.onInbound(platformId, anchoredThreadId, inbound);
+        },
       });
     bridge.resolveChannelName = async (platformId: string) => {
       try {

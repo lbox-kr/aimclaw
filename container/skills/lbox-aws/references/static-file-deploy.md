@@ -69,3 +69,6 @@ metadata 검증, invalidation 생성과 `Completed` 대기를 순서대로 수�
 - `AWS_SSO_LOGIN_REQUIRED`가 오면 Mac mini에서 메시지에 표시된 profile로
   `aws sso login`을 완료한 뒤 같은 요청을 다시 실행한다.
 - 성공 보고에는 SHA-256 일치, invalidation ID, `Completed`, CDN URL을 포함한다.
+- Slack에 최종 성공·실패를 보고하기 전에 `/slack-formatting`을 사용한다. 원시
+  오류와 전체 S3 key는 요약하고, 성공 링크는 `send_card`, 사용자의 재시도 결정은
+  `ask_user_question`으로 제공한다.
