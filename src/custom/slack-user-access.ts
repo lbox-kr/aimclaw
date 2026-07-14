@@ -17,6 +17,8 @@ import {
   createMessagingGroup,
   createMessagingGroupAgent,
   getMessagingGroupWithAgentCount,
+  setMessagingGroupDeniedAt,
+  updateMessagingGroup,
 } from '../db/messaging-groups.js';
 import { getDeliveryAdapter } from '../delivery.js';
 import { log } from '../log.js';
@@ -74,7 +76,7 @@ export function applyRequestPolicy(event: InboundEvent, userId: string | null, a
 
   const administrator = !!userId && (isOwner(userId) || isGlobalAdmin(userId));
   const allowlist = administrator ? { tools: [], commands: [], skills: {} } : loadAllowlist();
-  if (!administrator && event.channelType === 'slack' && userId) {
+  if (!administrator && event.channelType === 'slack' && event.message.isGroup === true && userId) {
     const author = content.author as { isBot?: unknown } | undefined;
     if (author?.isBot !== true) {
       addMember({ user_id: userId, agent_group_id: agentGroupId, added_by: null, added_at: new Date().toISOString() });
@@ -173,16 +175,32 @@ export function changeAdministrator(
 }
 
 registerMessageInterceptor(async (event) => {
-  if (event.channelType === 'slack' && event.message.isGroup === true && event.message.isMention === true) {
+  const isDm = event.channelType === 'slack' && event.message.isGroup === false;
+  const dmActor = isDm ? senderUserId(event) : null;
+  if (isDm && (!dmActor || (!isOwner(dmActor) && !isGlobalAdmin(dmActor)))) {
+    log.info('Slack DM dropped — sender is not a current administrator', { userId: dmActor });
+    return true;
+  }
+
+  if (event.channelType === 'slack' && (isDm || (event.message.isGroup === true && event.message.isMention === true))) {
     const instance = event.instance ?? event.channelType;
     const found = getMessagingGroupWithAgentCount(event.channelType, event.platformId, instance);
-    const agentGroups = found?.agentCount || found?.mg.denied_at ? [] : getAllAgentGroups();
+
+    if (isDm && found) {
+      if (found.mg.is_group !== 0 || found.mg.unknown_sender_policy !== 'strict') {
+        updateMessagingGroup(found.mg.id, { is_group: 0, unknown_sender_policy: 'strict' });
+      }
+      if (found.mg.denied_at) setMessagingGroupDeniedAt(found.mg.id, null);
+    }
+
+    const agentGroups = found?.agentCount || (!isDm && found?.mg.denied_at) ? [] : getAllAgentGroups();
 
     if (agentGroups.length === 1) {
+      const isGroup = !isDm;
       const agentGroup = agentGroups[0];
       const now = new Date().toISOString();
       const messagingGroupId = found?.mg.id ?? `mg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const engage = resolveWiringDefaults(instance, true, agentGroup.name, event.channelType);
+      const engage = resolveWiringDefaults(instance, isGroup, agentGroup.name, event.channelType);
 
       if (!found) {
         createMessagingGroup({
@@ -191,8 +209,8 @@ registerMessageInterceptor(async (event) => {
           platform_id: event.platformId,
           instance,
           name: null,
-          is_group: 1,
-          unknown_sender_policy: resolveUnknownSenderPolicy(instance, true, event.channelType),
+          is_group: isGroup ? 1 : 0,
+          unknown_sender_policy: isDm ? 'strict' : resolveUnknownSenderPolicy(instance, true, event.channelType),
           denied_at: null,
           created_at: now,
         });
@@ -213,11 +231,19 @@ registerMessageInterceptor(async (event) => {
         created_at: now,
       });
       deletePendingChannelApproval(messagingGroupId);
-      log.info('Slack channel automatically connected to sole agent', {
-        messagingGroupId,
-        agentGroupId: agentGroup.id,
-        platformId: event.platformId,
-      });
+      log.info(
+        isDm
+          ? 'Slack administrator DM automatically connected to sole agent'
+          : 'Slack channel automatically connected to sole agent',
+        {
+          messagingGroupId,
+          agentGroupId: agentGroup.id,
+          platformId: event.platformId,
+        },
+      );
+    } else if (isDm && !found?.agentCount) {
+      log.warn('Slack administrator DM dropped — exactly one agent group is required', { userId: dmActor });
+      return true;
     }
   }
 
