@@ -42,6 +42,16 @@ function generateId(): string {
   return `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function getCurrentRequestMessageId(db: Database): string | null {
+  const row = db
+    .prepare("SELECT value, updated_at FROM session_state WHERE key = 'current_request_message_id'")
+    .get() as { value: string; updated_at: string } | null;
+  if (!row) return null;
+  const age = Date.now() - new Date(row.updated_at).getTime();
+  if (!Number.isFinite(age) || age > 30 * 60 * 1000) return null;
+  return row.value;
+}
+
 /**
  * Write a cli_request to outbound.db.
  *
@@ -58,6 +68,7 @@ function writeRequest(req: RequestFrame): void {
 
   try {
     db.exec('BEGIN IMMEDIATE');
+    const requestMessageId = getCurrentRequestMessageId(db);
     const maxOut = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_out').get() as { m: number }).m;
     const maxIn = (inDb.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM messages_in').get() as { m: number }).m;
     const max = Math.max(maxOut, maxIn);
@@ -73,6 +84,7 @@ function writeRequest(req: RequestFrame): void {
       $content: JSON.stringify({
         action: 'cli_request',
         requestId: req.id,
+        requestMessageId,
         command: req.command,
         args: req.args,
       }),
@@ -177,7 +189,9 @@ function parseArgv(argv: string[]): {
 
 function printUsage(): void {
   process.stdout.write(
-    ['Usage: ncl <command> [--key value ...] [--json]', '', 'Run `ncl help` to list available commands.', ''].join('\n'),
+    ['Usage: ncl <command> [--key value ...] [--json]', '', 'Run `ncl help` to list available commands.', ''].join(
+      '\n',
+    ),
   );
 }
 
@@ -247,9 +261,7 @@ function formatHuman(resp: ResponseFrame): string {
   const header = keys.map((k, i) => k.padEnd(widths[i])).join('  ');
   const sep = widths.map((w) => '-'.repeat(w)).join('  ');
   const rows = data.map((r) =>
-    keys
-      .map((k, i) => String((r as Record<string, unknown>)[k] ?? '').padEnd(widths[i]))
-      .join('  '),
+    keys.map((k, i) => String((r as Record<string, unknown>)[k] ?? '').padEnd(widths[i])).join('  '),
   );
 
   return [header, sep, ...rows, ''].join('\n');

@@ -11,8 +11,14 @@ import { getSession } from '../db/sessions.js';
 import { isSafeAttachmentName } from '../attachment-safety.js';
 import { isPathInside } from '../inbox-safety.js';
 import { log } from '../log.js';
-import { registerApprovalHandler, requestApproval, type ApprovalHandler } from '../modules/approvals/index.js';
+import {
+  notifyAgent,
+  registerApprovalHandler,
+  requestApproval,
+  type ApprovalHandler,
+} from '../modules/approvals/index.js';
 import { registerApprovalResolvedHandler } from '../modules/approvals/primitive.js';
+import { hasAdminPrivilege } from '../modules/permissions/db/user-roles.js';
 import { sessionDir } from '../session-manager.js';
 
 const ACTION = 'lbox_aws_deploy_static_file';
@@ -290,15 +296,47 @@ function stageAttachment(
   };
 }
 
-async function requestStaticFileDeployment(
+export async function requestStaticFileDeployment(
   request: StaticFileDeployRequest,
   ctx: CallerContext,
+  applyDeployment: ApprovalHandler = applyStaticFileDeployment,
 ): Promise<Record<string, unknown>> {
   if (ctx.caller !== 'agent') throw new Error(`${COMMAND} must be requested from an agent session`);
   const session = getSession(ctx.sessionId);
   if (!session || session.agent_group_id !== ctx.agentGroupId) throw new Error('requesting session was not found');
   const staged = stageAttachment(request, ctx);
   const agentName = getAgentGroup(ctx.agentGroupId)?.name ?? ctx.agentGroupId;
+  const administrator =
+    !!ctx.requesterUserId && hasAdminPrivilege(ctx.requesterUserId, ctx.agentGroupId) ? ctx.requesterUserId : null;
+
+  if (administrator) {
+    log.info('LBox AWS static file deployment auto-authorized', {
+      deploymentId: staged.deploymentId,
+      requestedBy: administrator,
+      target: staged.target ?? staged.s3Uri,
+    });
+    void applyDeployment({
+      session,
+      payload: { ...staged },
+      userId: administrator,
+      notify: (text) => notifyAgent(session, text),
+    }).catch((error) => {
+      log.error('Auto-authorized LBox AWS deployment handler failed', {
+        deploymentId: staged.deploymentId,
+        requestedBy: administrator,
+        err: error,
+      });
+    });
+
+    return {
+      state: 'deployment_started',
+      deployment_id: staged.deploymentId,
+      target: staged.target ?? 'explicit',
+      profile: staged.profile,
+      s3_uri: staged.s3Uri,
+      sha256: staged.sourceSha256,
+    };
+  }
 
   await requestApproval({
     session,
@@ -480,10 +518,20 @@ export async function executeStaticFileDeployment(
 
 const activeTargets = new Set<string>();
 
+function cleanupStagedDeployment(request: Partial<StagedStaticFileDeploy>): void {
+  if (!request.stagedPath) return;
+  try {
+    fs.rmSync(path.dirname(request.stagedPath), { recursive: true, force: true });
+  } catch (error) {
+    log.warn('Failed to clean LBox AWS staging directory', { deploymentId: request.deploymentId, err: error });
+  }
+}
+
 export const applyStaticFileDeployment: ApprovalHandler = async ({ payload, notify, userId }) => {
   const request = payload as unknown as StagedStaticFileDeploy;
   if (activeTargets.has(request.s3Uri)) {
     notify(`같은 S3 target의 LBox AWS 배포가 이미 진행 중입니다: ${request.s3Uri}`);
+    cleanupStagedDeployment(request);
     return;
   }
 
@@ -515,6 +563,7 @@ export const applyStaticFileDeployment: ApprovalHandler = async ({ payload, noti
     });
   } finally {
     activeTargets.delete(request.s3Uri);
+    cleanupStagedDeployment(request);
   }
 };
 
@@ -533,8 +582,7 @@ registerApprovalHandler(ACTION, applyStaticFileDeployment);
 registerApprovalResolvedHandler(({ approval }) => {
   if (approval.action !== ACTION) return;
   try {
-    const payload = JSON.parse(approval.payload) as Partial<StagedStaticFileDeploy>;
-    if (payload.stagedPath) fs.rmSync(path.dirname(payload.stagedPath), { recursive: true, force: true });
+    cleanupStagedDeployment(JSON.parse(approval.payload) as Partial<StagedStaticFileDeploy>);
   } catch (error) {
     log.warn('Failed to clean LBox AWS staging directory', { approvalId: approval.approval_id, err: error });
   }

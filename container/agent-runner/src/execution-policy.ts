@@ -6,6 +6,7 @@ type ExecutionPolicy = {
 };
 
 type AuthorizationMessage = {
+  id?: string;
   kind: string;
   channel_type: string | null;
   trigger: number;
@@ -45,13 +46,13 @@ function readPolicy(content: string): ExecutionPolicy | null {
 }
 
 /** One runner serves one session, so one mutable policy follows its active query. */
-export function setExecutionPolicyForMessages(messages: AuthorizationMessage[]): void {
-  const triggering = messages.filter((message) => message.trigger === 1);
-  const message = triggering.at(-1) ?? messages.at(-1);
+export function setExecutionPolicyForMessages(messages: AuthorizationMessage[]): string | null {
+  const message = messages.filter((message) => message.trigger === 1).at(-1) ?? messages.at(-1);
   const trustedSystem = message?.kind === 'task' || message?.kind === 'system' || message?.channel_type === 'agent';
   currentPolicy =
     (message && readPolicy(message.content)) ?? (trustedSystem ? { ...memberPolicy, role: 'system' } : memberPolicy);
   selectedTools.clear();
+  return message?.id ?? null;
 }
 
 /** Final enforcement point called by Claude's PreToolUse hook. */

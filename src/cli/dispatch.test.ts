@@ -47,6 +47,11 @@ vi.mock('../db/sessions.js', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
 }));
 
+const mockHasAdminPrivilege = vi.fn().mockReturnValue(false);
+vi.mock('../modules/permissions/db/user-roles.js', () => ({
+  hasAdminPrivilege: (...args: unknown[]) => mockHasAdminPrivilege(...args),
+}));
+
 // dispatch's post-handler looks up the resource's `scopeField` via getResource.
 // The real resources aren't registered in this unit test, so mock it.
 const mockGetResource = vi.fn();
@@ -221,6 +226,7 @@ import type { CallerContext } from './frame.js';
 beforeEach(() => {
   vi.clearAllMocks();
   approvalState.observedContexts.length = 0;
+  mockHasAdminPrivilege.mockReturnValue(false);
   // Default: the four CLI-whitelisted resources with their real scopeFields.
   const scopeFields: Record<string, string> = {
     groups: 'id',
@@ -505,6 +511,19 @@ describe('CLI scope enforcement', () => {
 
     expect(approvalState.observedContexts).toEqual([ctx]);
     expect(approvalState.requestApproval).toHaveBeenCalledTimes(1);
+  });
+
+  it('executes an approval-gated command directly for a host-attributed administrator request', async () => {
+    mockGetContainerConfig.mockReturnValue({ cli_scope: 'group' });
+    mockHasAdminPrivilege.mockReturnValue(true);
+    const ctx = agentCtx({ requesterUserId: 'slack:UADMIN' });
+
+    const resp = await dispatch({ id: '1', command: 'approval-context-command', args: {} }, ctx);
+
+    expect(resp.ok).toBe(true);
+    expect(mockHasAdminPrivilege).toHaveBeenCalledWith('slack:UADMIN', 'g1');
+    expect(approvalState.requestApproval).not.toHaveBeenCalled();
+    expect(approvalState.observedContexts).toEqual([ctx]);
   });
 
   // --- Post-handler filtering ---

@@ -5,7 +5,9 @@ import { authorizeTool, setExecutionPolicyForMessages } from './execution-policy
 const message = (
   policy: Record<string, unknown> | null,
   trigger = 1,
-): { kind: string; channel_type: string | null; trigger: number; content: string } => ({
+  id = 'message-1',
+): { id: string; kind: string; channel_type: string | null; trigger: number; content: string } => ({
+  id,
   kind: 'chat-sdk',
   channel_type: 'slack',
   trigger,
@@ -49,10 +51,11 @@ describe('tool execution policy', () => {
     ]);
     expect(authorizeTool('Skill', { skill: 'notify' }).allowed).toBe(true);
 
-    setExecutionPolicyForMessages([
-      message({ userId: 'slack:OLD', role: 'administrator', allowedTools: [], skillTools: {} }, 0),
-      message({ userId: 'slack:CURRENT', role: 'member', allowedTools: [], skillTools: {} }),
+    const requestMessageId = setExecutionPolicyForMessages([
+      message({ userId: 'slack:OLD', role: 'administrator', allowedTools: [], skillTools: {} }, 0, 'old-message'),
+      message({ userId: 'slack:CURRENT', role: 'member', allowedTools: [], skillTools: {} }, 1, 'current-message'),
     ]);
+    expect(requestMessageId).toBe('current-message');
     expect(authorizeTool('Skill', { skill: 'notify' }).allowed).toBe(false);
     expect(authorizeTool('mcp__nanoclaw__send_message', {}).allowed).toBe(false);
   });
