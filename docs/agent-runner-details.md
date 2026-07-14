@@ -68,7 +68,7 @@ interface QueryInput {
   cwd: string;
 
   /** System context to inject; the provider translates it into whatever its
-   *  SDK expects (preset append, full system prompt, per-turn injection). */
+   *  SDK expects (full system prompt, per-turn injection, etc.). */
   systemContext?: { instructions?: string };
 }
 
@@ -145,9 +145,9 @@ class ClaudeProvider implements AgentProvider {
         additionalDirectories: this.additionalDirectories,
         resume: input.continuation,
         pathToClaudeCodeExecutable: '/pnpm/claude',
-        systemPrompt: input.systemContext?.instructions
-          ? { type: 'preset', preset: 'claude_code', append: input.systemContext.instructions }
-          : undefined,
+        // NanoClaw owns its chat identity, behavior, and permission model, so
+        // this is a complete custom prompt rather than the Claude Code preset.
+        systemPrompt: input.systemContext?.instructions,
         // Base tools plus one `mcp__<server>__*` pattern per registered MCP
         // server — without the explicit MCP patterns the SDK's allowedTools
         // filter silently drops every MCP namespace.
@@ -181,6 +181,12 @@ class ClaudeProvider implements AgentProvider {
   }
 }
 ```
+
+The Claude provider deliberately does not inherit the `claude_code` preset.
+NanoClaw's shared contract supplies the system-level identity, behavior, tool
+discipline, and safety rules for its messaging surface. Project and user
+instructions still load separately through `settingSources`, including the
+composed `CLAUDE.md`, per-group `CLAUDE.local.md`, skills, and settings.
 
 `translateEvents` is an async generator that yields `{ type: 'activity' }` for **every**
 SDK message (so the idle timer stays honest) and maps recognized messages to `ProviderEvent`:
