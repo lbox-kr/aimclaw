@@ -43,7 +43,7 @@ const HEARTBEAT_FRESH_MS = 6000;
  * stays running; ticks inside the pause just skip the setTyping call.
  */
 const POST_DELIVERY_PAUSE_MS = 10000;
-const DEFAULT_WORKING_STATUS = '요청을 처리하고 있어요';
+const DEFAULT_WORKING_STATUS = '입력 중…';
 
 interface TypingAdapter {
   setTyping?(
@@ -190,15 +190,14 @@ export function startTypingRefresh(
   });
 }
 
-/** Replace the native working text for an active request and display it
- * immediately. The periodic refresher keeps the same text alive while the
- * container heartbeat remains fresh. */
-export function updateTypingStatus(sessionId: string, status: string): void {
+/** Keep the native indicator alive when a phase update arrives. Deliberately
+ * ignore generated progress text so the UI feels like a person typing instead
+ * of a bot narrating each step. */
+export function updateTypingStatus(sessionId: string, _status: string): void {
   const entry = typingRefreshers.get(sessionId);
   if (!entry) return;
-  entry.status = status;
   entry.pausedUntil = 0;
-  void triggerTyping(sessionId, entry.channelType, entry.platformId, entry.threadId, entry.instance, status);
+  void triggerTyping(sessionId, entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.status);
 }
 
 /**
