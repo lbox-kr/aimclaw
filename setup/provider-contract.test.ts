@@ -101,6 +101,7 @@ describe('AimClaw keeps one team identity and voice', () => {
     const contract = read('container/CLAUDE.md');
     const slack = read('container/skills/slack-formatting/SKILL.md');
     const slackInstructions = read('container/skills/slack-formatting/instructions.md');
+    const currentThread = read('container/agent-runner/src/mcp-tools/current-thread.ts');
     const productSearch = read('container/skills/lbox-product-code-search/SKILL.md');
 
     expect(contract).toContain('기존 구조를 그대로 반복하지 않고');
@@ -117,7 +118,10 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(slack).toContain('상태, 위험, 진행 여부를 빠르게 구분하는 emoji는 장식이 아니라 정보 표현');
     expect(slack).toContain('사용자가 실제로 접근할 수 있다고 확인된 링크나 경로만');
     expect(slack).not.toContain('진행 reaction');
-    expect(slack).toContain('같은 작성자의 아직 답변되지 않은 명시적 요청');
+    expect(slack).not.toContain('## Thread와 mention');
+    expect(slack).not.toContain('read_current_thread');
+    expect(slackInstructions).not.toContain('read_current_thread');
+    expect(currentThread).toContain('같은 작성자의 아직 답변되지 않은 명시적 요청');
     expect(slack).not.toContain('최신 Slack Markdown');
     expect(slack).not.toContain('약 4,000자');
     expect(productSearch).toContain('commit에 고정된 짧은 코드 링크');
