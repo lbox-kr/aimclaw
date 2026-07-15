@@ -31,6 +31,12 @@ import {
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 import { setExecutionPolicyForMessages } from './execution-policy.js';
+import {
+  applyResponseMode,
+  responseDensityViolations,
+  selectResponseMode,
+  type ResponseMode,
+} from './response-density.js';
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
@@ -237,7 +243,15 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
 
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
-    const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+    const responseMode = selectResponseMode(keep);
+    const formattedPrompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+    // Native slash commands must remain the first raw input so the provider
+    // can dispatch them. Ordinary Slack turns receive the app-selected mode
+    // as a compact per-turn directive, separate from the global prompt.
+    const prompt =
+      routing.channelType === 'slack' && !keep.some((message) => isRunnerCommand(message))
+        ? applyResponseMode(formattedPrompt, responseMode)
+        : formattedPrompt;
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
@@ -264,6 +278,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         config.provider.onExchangeComplete?.bind(config.provider),
         prompt,
         continuation,
+        responseMode,
       );
       if (result.continuation && result.continuation !== continuation) {
         continuation = result.continuation;
@@ -349,16 +364,20 @@ export async function processQuery(
   onExchangeComplete: ((exchange: ProviderExchange) => void) | undefined,
   initialPrompt: string,
   initialContinuation: string | undefined,
+  initialResponseMode: ResponseMode = 'brief',
 ): Promise<QueryResult> {
   let queryContinuation: string | undefined;
   let done = false;
   let unwrappedNudged = false;
   let nativeStreamActive = false;
-  // Prompt queue for the exchange hook — each result event consumes the
-  // oldest unanswered prompt, except a wrapping-retry result, which answers
-  // the same prompt again. Unused (and unmaintained) when the provider
-  // doesn't implement `onExchangeComplete`.
-  const archivePrompts: string[] = [initialPrompt];
+  // Prompt queue for the exchange hook and per-turn response policy. Each
+  // result consumes the oldest unanswered prompt except a wrapping or density
+  // retry, which still answers that same prompt.
+  const pendingExchanges: Array<{
+    prompt: string;
+    responseMode: ResponseMode;
+    densityRetried: boolean;
+  }> = [{ prompt: initialPrompt, responseMode: initialResponseMode, densityRetried: false }];
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -434,12 +453,16 @@ export async function processQuery(
         if (done) return;
 
         const keptIds = keep.map((m) => m.id);
-        const prompt = formatMessages(keep);
+        const responseMode = selectResponseMode(keep);
+        const formattedPrompt = formatMessages(keep);
+        const prompt = keep.some((message) => message.channel_type === 'slack')
+          ? applyResponseMode(formattedPrompt, responseMode)
+          : formattedPrompt;
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
         setCurrentRequestMessageId(setExecutionPolicyForMessages(keep));
         query.push(prompt);
-        archivePrompts.push(prompt);
+        pendingExchanges.push({ prompt, responseMode, densityRetried: false });
         markCompleted(keptIds);
       } catch (err) {
         // Without this catch the rejection escapes the void IIFE and Node
@@ -506,7 +529,25 @@ export async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          const { sent, hasUnwrapped } = dispatchResultText(event.text, routing);
+          const exchange = pendingExchanges[0] ?? {
+            prompt: initialPrompt,
+            responseMode: initialResponseMode,
+            densityRetried: false,
+          };
+          const compressionNudge =
+            event.isError === true ? null : slackCompressionNudge(event.text, exchange.responseMode);
+          const willRetryDensity = compressionNudge !== null && !exchange.densityRetried;
+          if (compressionNudge && exchange.densityRetried) {
+            log(
+              `Slack response still exceeds ${exchange.responseMode} density after one retry; ` +
+                'delivering without truncation',
+            );
+          }
+          // Validation must happen before dispatch: once a message row is
+          // written, a compression retry would create a duplicate Slack post.
+          const { sent, hasUnwrapped } = willRetryDensity
+            ? { sent: 0, hasUnwrapped: false }
+            : dispatchResultText(event.text, routing);
           if (sent === 0 && event.isError === true) {
             // Non-retryable error turn (e.g. a 403 billing_error) with no
             // <message> envelope: deliver the notice instead of dropping it as
@@ -514,21 +555,25 @@ export async function processQuery(
             // the failing gateway turn after turn.
             deliverErrorResult(event.text, routing);
             notifyExchangeComplete(onExchangeComplete, {
-              prompt: archivePrompts[0] ?? initialPrompt,
+              prompt: exchange.prompt,
               result: event.text,
               continuation: queryContinuation ?? initialContinuation,
               status: 'error',
             });
-            archivePrompts.shift();
+            pendingExchanges.shift();
           } else {
             const willRetryWrapping = hasUnwrapped && !unwrappedNudged;
             notifyExchangeComplete(onExchangeComplete, {
-              prompt: archivePrompts[0] ?? initialPrompt,
+              prompt: exchange.prompt,
               result: event.text,
               continuation: queryContinuation ?? initialContinuation,
-              status: hasUnwrapped ? 'undelivered' : 'completed',
+              status: willRetryDensity || hasUnwrapped ? 'undelivered' : 'completed',
             });
-            if (willRetryWrapping) {
+            if (willRetryDensity) {
+              keepNativeStreamOpen = true;
+              exchange.densityRetried = true;
+              query.push(compressionNudge);
+            } else if (willRetryWrapping) {
               keepNativeStreamOpen = true;
               unwrappedNudged = true;
               const destinations = getAllDestinations();
@@ -540,27 +585,27 @@ export async function processQuery(
                   `Please re-send your response with the correct wrapping.</system>`,
               );
             }
-            // The wrapping-retry result answers the SAME user prompt — keep it
-            // queued so the retry archives against it, not the nudge text.
-            if (!willRetryWrapping) archivePrompts.shift();
+            // Retry results answer the SAME user prompt — keep it queued so
+            // provider archives associate the retry with the original turn.
+            if (!willRetryDensity && !willRetryWrapping) pendingExchanges.shift();
           }
         } else {
-          archivePrompts.shift();
+          pendingExchanges.shift();
         }
         if (!keepNativeStreamOpen && nativeStreamActive) {
           endNativeStream(routing);
           nativeStreamActive = false;
         }
         // A completed turn resets the mid-turn send record so the next turn
-        // starts clean. Keep it across a wrapping-retry: the re-sent final text
-        // must still dedup against sends made during the same user prompt.
+        // starts clean. Keep it across a retry: the re-sent final text must
+        // still dedup against sends made during the same user prompt.
         if (!keepNativeStreamOpen) clearTurnSends();
       }
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     notifyExchangeComplete(onExchangeComplete, {
-      prompt: archivePrompts[0] ?? initialPrompt,
+      prompt: pendingExchanges[0]?.prompt ?? initialPrompt,
       result: `Error: ${errMsg}`,
       continuation: queryContinuation ?? initialContinuation,
       status: 'error',
@@ -683,6 +728,31 @@ function deliverErrorResult(text: string, routing: RoutingContext): void {
     thread_id: routing.threadId,
     content: JSON.stringify({ text, _nanoclawFinal: true }),
   });
+}
+
+/** Build one retry from all Slack blocks before dispatch, avoiding duplicate posts. */
+function slackCompressionNudge(text: string, mode: ResponseMode): string | null {
+  const failures: string[] = [];
+  const messagePattern = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = messagePattern.exec(text)) !== null) {
+    const destination = findByName(match[1]);
+    if (destination?.type !== 'channel' || destination.channelType !== 'slack') continue;
+
+    const violations = responseDensityViolations(match[2].trim(), mode);
+    if (violations.length) failures.push(`${destination.name}: ${violations.join(', ')}`);
+  }
+
+  if (!failures.length) return null;
+  return (
+    `<system>방금 Slack 답변은 앱의 ${mode} 밀도 검사에서 보류됐습니다 (${failures.join('; ')}). ` +
+    '새 조사나 도구 호출 없이, 방금 답변의 사실과 결론을 유지하고 표현만 압축하세요. ' +
+    '직접 답, 결론을 바꾸는 핵심 근거, 중대한 위험·예외, 다음 행동은 보존하세요. ' +
+    '질문 재진술, 반복, 일반 배경, 부차적 예시와 긴 method chain부터 제거하세요. ' +
+    'Markdown과 emoji는 의미를 더할 때 유지해도 됩니다. ' +
+    '모든 전송 내용은 <message to="name">...</message>로 다시 보내세요.</system>'
+  );
 }
 
 /**
