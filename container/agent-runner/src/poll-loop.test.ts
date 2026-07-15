@@ -3,16 +3,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from './db/connection.js';
 import { getPendingMessages, markCompleted } from './db/messages-in.js';
 import { getUndeliveredMessages, writeMessageOut } from './db/messages-out.js';
+import { clearTurnSends, recordTurnSend, setCurrentRequestMessageId } from './db/session-state.js';
 import { formatMessages, extractRouting } from './formatter.js';
 import { isCorruptionError, processQuery } from './poll-loop.js';
 import { MockProvider } from './providers/mock.js';
 import type { AgentQuery, ProviderEvent } from './providers/types.js';
-import { clearTurnSends, recordTurnSend } from './turn-sends.js';
 
 beforeEach(() => {
   initTestSessionDb();
-  // turn-sends is process-global; reset it so a prior test's record can't
-  // suppress a message here.
+  // Turn-send records live in session_state; reset them so a prior test
+  // cannot suppress a message here.
   clearTurnSends();
 });
 
@@ -224,7 +224,13 @@ describe('origin metadata (from= attribute)', () => {
       .run(name, name, channelType, platformId);
   }
 
-  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
+  function insertWithRouting(
+    id: string,
+    kind: string,
+    content: object,
+    channelType: string | null,
+    platformId: string | null,
+  ): void {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
@@ -503,6 +509,7 @@ describe('interactive turn deduplication', () => {
   };
 
   function seedMidTurnSend(text: string): void {
+    setCurrentRequestMessageId(routing.inReplyTo);
     getInboundDb()
       .prepare(
         `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
@@ -514,8 +521,8 @@ describe('interactive turn deduplication', () => {
     // the mid-turn send recorded under.
     getInboundDb()
       .prepare(
-        `INSERT INTO messages_in (id, kind, timestamp, status, trigger, channel_type, platform_id, thread_id, content)
-         VALUES ('m1', 'chat-sdk', datetime('now'), 'processing', 1, 'slack', 'slack:D1', ?, ?)`,
+        `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, channel_type, platform_id, thread_id, content)
+         VALUES ('m1', 2, 'chat-sdk', datetime('now'), 'processing', 1, 'slack', 'slack:D1', ?, ?)`,
       )
       .run(routing.threadId, JSON.stringify({ text: 'hi' }));
     // Mirror what the send_message MCP tool does: write the standalone chat row
@@ -564,6 +571,39 @@ describe('interactive turn deduplication', () => {
     const finalRow = out.find((m) => JSON.parse(m.content)._nanoclawFinal === true);
     expect(finalRow).toBeDefined();
     expect(JSON.parse(finalRow!.content).text).toBe(finalText);
+  });
+
+  it('keeps identical text when the question comes from a copied thread', async () => {
+    const text = '복사한 스레드에서도 다시 답해 주세요.';
+    seedMidTurnSend(text);
+    const copiedThreadId = 'slack:D1:1712345678.000200';
+    setCurrentRequestMessageId('m-copy');
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, seq, kind, timestamp, status, trigger, channel_type, platform_id, thread_id, content)
+         VALUES ('m-copy', 4, 'chat-sdk', datetime('now'), 'processing', 1, 'slack', 'slack:D1', ?, ?)`,
+      )
+      .run(copiedThreadId, JSON.stringify({ text: 'same question' }));
+    const { query } = makeResultQuery({
+      type: 'result',
+      text: `<message to="dm">${text}</message>`,
+    });
+
+    await processQuery(
+      query,
+      { ...routing, threadId: copiedThreadId, inReplyTo: 'm-copy' },
+      ['m-copy'],
+      'claude',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(2);
+    const finalRow = out.find((message) => JSON.parse(message.content)._nanoclawFinal === true);
+    expect(finalRow?.thread_id).toBe(copiedThreadId);
+    expect(JSON.parse(finalRow!.content).text).toBe(text);
   });
 });
 
@@ -636,10 +676,7 @@ describe('Slack native stream events', () => {
     );
 
     const out = getUndeliveredMessages();
-    expect(out.map((row) => JSON.parse(row.content).action)).toEqual([
-      'stream_task_update',
-      'stream_end',
-    ]);
+    expect(out.map((row) => JSON.parse(row.content).action)).toEqual(['stream_task_update', 'stream_end']);
   });
 });
 

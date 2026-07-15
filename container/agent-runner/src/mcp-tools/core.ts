@@ -13,9 +13,8 @@ import path from 'path';
 import { findByName, getAllDestinations } from '../destinations.js';
 import { getDestinationReplyRouting } from '../db/messages-in.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
-import { getCurrentInReplyTo } from '../db/session-state.js';
+import { getCurrentInReplyTo, recordTurnSend } from '../db/session-state.js';
 import { getSessionRouting } from '../db/session-routing.js';
-import { recordTurnSend } from '../turn-sends.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
 

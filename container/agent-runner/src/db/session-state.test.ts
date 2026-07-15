@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 
 import { getOutboundDb, initTestSessionDb } from './connection.js';
 import {
+  clearTurnSends,
   clearContinuation,
   getContinuation,
   migrateLegacyContinuation,
+  recordTurnSend,
   setContinuation,
   setCurrentRequestMessageId,
+  wasSentThisTurn,
 } from './session-state.js';
 
 beforeEach(() => {
@@ -26,6 +29,43 @@ describe('session-state — active request attribution', () => {
     expect(
       getOutboundDb().prepare("SELECT value FROM session_state WHERE key = 'current_request_message_id'").get(),
     ).toBeNull();
+  });
+});
+
+describe('session-state — turn send deduplication', () => {
+  test('persists the active request send in shared session state', () => {
+    setCurrentRequestMessageId('request-1');
+    recordTurnSend('slack', 'slack:C1', 'slack:C1:thread-1', '같은 답변');
+
+    expect(wasSentThisTurn('slack', 'slack:C1', 'slack:C1:thread-1', '같은 답변')).toBe(true);
+    const row = getOutboundDb().prepare("SELECT value FROM session_state WHERE key GLOB 'turn_send:*'").get() as {
+      value: string;
+    };
+    expect(row.value).toBe('request-1');
+  });
+
+  test('does not suppress the same text in a copied thread', () => {
+    setCurrentRequestMessageId('request-1');
+    recordTurnSend('slack', 'slack:C1', 'slack:C1:thread-original', '같은 답변');
+
+    expect(wasSentThisTurn('slack', 'slack:C1', 'slack:C1:thread-copy', '같은 답변')).toBe(false);
+  });
+
+  test('does not suppress the same text in a later request', () => {
+    setCurrentRequestMessageId('request-1');
+    recordTurnSend('slack', 'slack:C1', 'slack:C1:thread-1', '같은 답변');
+
+    setCurrentRequestMessageId('request-2');
+    expect(wasSentThisTurn('slack', 'slack:C1', 'slack:C1:thread-1', '같은 답변')).toBe(false);
+  });
+
+  test('clears all send records after the turn completes', () => {
+    setCurrentRequestMessageId('request-1');
+    recordTurnSend('slack', 'slack:C1', 'slack:C1:thread-1', '같은 답변');
+
+    clearTurnSends();
+
+    expect(wasSentThisTurn('slack', 'slack:C1', 'slack:C1:thread-1', '같은 답변')).toBe(false);
   });
 });
 
