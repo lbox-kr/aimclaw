@@ -3,8 +3,8 @@ name: onecli-gateway
 description: >-
   OneCLI Gateway: transparent HTTPS proxy that injects stored credentials
   into outbound calls. You MUST use this skill when the user asks you to
-  read emails, check calendar, access GitHub repos, create issues, check
-  Stripe payments, or interact with ANY external service or API. Do NOT
+  read emails, check calendar, check Stripe payments, or interact with an
+  external service or API without a team-specific host integration. Do NOT
   use browser extensions or OAuth CLI tools. Make HTTP requests directly;
   the gateway injects credentials automatically.
 compatibility: Requires HTTPS_PROXY set in environment (automatic when launched via `onecli run`)
@@ -21,11 +21,14 @@ see or handle credential values directly.
 
 ## How to Access External Services
 
-You have direct HTTP access to external APIs. OAuth apps (Gmail, GitHub,
+You have direct HTTP access to external APIs. OAuth apps (Gmail,
 Google Calendar, Google Drive, etc.) and API key services are all available
 through the gateway. Just make the request directly; the gateway injects
 credentials if the app is connected. If not, it returns an error with a
 connect URL you can present to the user.
+
+LBox GitHub is an explicit exception. Use the `team-github` skill and its
+host-side `ncl github ...` commands instead of this gateway.
 
 ## Making Requests
 
@@ -34,7 +37,6 @@ credentials automatically.
 
 ```bash
 curl -s "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=5"
-curl -s "https://api.github.com/user/repos?per_page=10"
 curl -s "https://api.stripe.com/v1/charges?limit=5"
 ```
 
@@ -78,7 +80,7 @@ request. If the retry still fails, ask if they need help with the setup.
   gateway handles credentials for you.
 - **Never** ask the user for API keys or tokens directly. Direct them to
   connect the service in the OneCLI dashboard.
-- **Never** suggest the user open Gmail/Calendar/GitHub in their browser
+- **Never** suggest the user open Gmail or Calendar in their browser
   when they ask you to read or interact with those services. You have API
   access. Use it.
 - If the gateway returns a policy error (403 with a JSON body), respect
