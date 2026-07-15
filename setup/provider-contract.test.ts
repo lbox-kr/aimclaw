@@ -107,27 +107,28 @@ describe('AimClaw keeps one team identity and voice', () => {
     expect(contract).toContain('기존 구조를 그대로 반복하지 않고');
     expect(contract).toContain('공식 보고서 문체를 요청하지 않았다면');
     expect(slackInstructions).toContain('최종 응답 전에 `/slack-formatting`을 사용한다');
+    expect(slackInstructions).toContain('`response_mode`를 응답량의 기준으로 삼는다');
     expect(slack).toContain('아래 예시는 복사할 고정 양식이 아니다');
-    expect(slack).toContain('`container/CLAUDE.md`의 친근한 해요체를 유지하고');
-    expect(slack).toContain('공통 상태는 한 번 말하고');
-    expect(slack).toContain('근거는 그 아래 한 단계나 링크·파일로 내린다');
-    expect(slack).toContain('평문 하나를 기본으로 하고, 한 응답의 주 형식은 하나만 선택한다');
-    expect(slack).toContain('카드는 정보를 보여주고 URL 행동만 제공하며');
+    expect(slack).toContain('응답량은 런타임이 이번 요청에 붙인 `response_mode`와 전송 전 밀도 검사가 결정한다');
+    expect(slack).toContain('질문에 대한 직접 답');
+    expect(slack).toContain('결론을 바꾸는 핵심 근거');
+    expect(slack).toContain('같은 결론의 반복과 별도 마무리 요약');
+    expect(slack).toContain('조사 깊이와 답변 길이는 별개다');
+    expect(slack).toContain('평문·카드·파일 설명 중 주 형식은 하나만 선택하고');
+    expect(slack).toContain('답을 받아야 하는 제한된 선택만 `ask_user_question`으로 묻는다');
     expect(slack).toContain('사용자가 접근할 수 없는 내부 경로는 제시하지 않는다');
     for (const example of [
-      '### 한 가지 답',
-      '### 후속 코드 검토',
-      '### 모두 같은 상태',
-      '### 상태가 섞인 점검',
-      '### 병렬 영향',
-      '### 설계 선택과 도입 조건',
-      '### 장애 상태와 복구 계층',
-      '### 배포 준비도와 실행 순서',
-      '### UI를 쓰는 경우',
+      '### 짧은 직접 답',
+      '### 상태가 섞인 짧은 답',
+      '### 비교가 필요한 상세 답',
+      '### 복구 상태와 실행 순서가 함께 있는 상세 답',
     ]) {
       expect(slack).toContain(example);
     }
-    expect((slack.match(/^  - /gm) ?? []).length).toBeGreaterThanOrEqual(10);
+    expect(slack).toMatch(/\| 기준\s+\| A안\s+\| B안\s+\|/);
+    expect(slack).toContain('- ⚠️ 업로드 재시도율이 8%로 올랐어요');
+    expect(slack).toContain('> B안은 팀마다 다른 정책');
+    expect(slack).toContain('- [x] 오류를 만든 worker 배포 되돌리기');
     expect(slack).not.toContain('- ✅ **결제 webhook**');
     expect(slack).not.toContain('점검 3건 중 2건은 정상이고');
     expect(slack).not.toContain('진행 reaction');

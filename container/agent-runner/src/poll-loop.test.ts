@@ -414,6 +414,32 @@ function makeResultQuery(result: ProviderEvent): { query: AgentQuery; pushes: st
   };
 }
 
+function makeRetryQuery(first: ProviderEvent, second: ProviderEvent): { query: AgentQuery; pushes: string[] } {
+  const pushes: string[] = [];
+  let releaseRetry: (() => void) | undefined;
+  const retryPushed = new Promise<void>((resolve) => {
+    releaseRetry = resolve;
+  });
+  async function* events(): AsyncGenerator<ProviderEvent> {
+    yield { type: 'init', continuation: 'sess-1' };
+    yield first;
+    await retryPushed;
+    yield second;
+  }
+  return {
+    pushes,
+    query: {
+      push: (message: string) => {
+        pushes.push(message);
+        releaseRetry?.();
+      },
+      end: () => {},
+      events: events(),
+      abort: () => {},
+    },
+  };
+}
+
 const ERR_ROUTING = {
   platformId: 'chan-1',
   channelType: 'discord',
@@ -445,6 +471,54 @@ describe('error result with no <message> envelope', () => {
     expect(getUndeliveredMessages()).toHaveLength(0);
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
+  });
+});
+
+describe('Slack response density guard', () => {
+  it('holds an over-dense final answer and delivers its one-time compressed retry', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('slack-main', 'Slack', 'channel', 'slack', 'slack:C1', NULL)`,
+      )
+      .run();
+    const first = `<message to="slack-main">검증 결과는 맞아요.
+
+**정확히 확인된 부분**
+
+- 첫 번째 근거
+- 두 번째 근거
+- 세 번째 근거
+
+**세부가 다른 부분**
+
+- 네 번째 근거</message>`;
+    const compressed = '<message to="slack-main">검증 결과는 맞아요. 세부 호출 지점 하나만 정정하면 됩니다.</message>';
+    const { query, pushes } = makeRetryQuery({ type: 'result', text: first }, { type: 'result', text: compressed });
+
+    await processQuery(
+      query,
+      {
+        platformId: 'slack:C1',
+        channelType: 'slack',
+        threadId: null,
+        inReplyTo: 'm1',
+        taskFire: false,
+      },
+      ['m1'],
+      'claude',
+      undefined,
+      'prompt',
+      undefined,
+      'brief',
+    );
+
+    expect(pushes).toHaveLength(1);
+    expect(pushes[0]).toContain('밀도 검사에서 보류');
+    expect(pushes[0]).toContain('Markdown과 emoji');
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0].content).text).toBe('검증 결과는 맞아요. 세부 호출 지점 하나만 정정하면 됩니다.');
   });
 });
 
