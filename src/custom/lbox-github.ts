@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import type { CallerContext } from '../cli/frame.js';
-import { register, type Access } from '../cli/registry.js';
+import { register } from '../cli/registry.js';
 import { log } from '../log.js';
 
 const REPOS_PATH = path.join(process.cwd(), 'container', 'skills', 'lbox-product-code-search', 'repos.txt');
@@ -66,17 +66,19 @@ const ISSUE_VIEW_FIELDS = [
   'url',
 ].join(',');
 
-export type GitHubOperation =
-  | 'pr-list'
-  | 'pr-view'
-  | 'pr-checks'
-  | 'issue-list'
-  | 'issue-view'
-  | 'issue-create'
-  | 'pr-comment'
-  | 'issue-comment';
+const COMMANDS = [
+  ['pr-list', 'List pull requests in an allowed LBox repository.'],
+  ['pr-view', 'View a pull request in an allowed LBox repository.'],
+  ['pr-checks', 'View pull request checks in an allowed LBox repository.'],
+  ['issue-list', 'List issues in an allowed LBox repository.'],
+  ['issue-view', 'View an issue in an allowed LBox repository.'],
+  ['issue-create', 'Create an issue in an allowed LBox repository.'],
+  ['pr-comment', 'Comment on a pull request in an allowed LBox repository.'],
+  ['issue-comment', 'Comment on an issue in an allowed LBox repository.'],
+] as const;
+type GitHubOperation = (typeof COMMANDS)[number][0];
 
-export interface GitHubRequest {
+interface GitHubRequest {
   operation: GitHubOperation;
   repo: string;
   number?: number;
@@ -89,32 +91,24 @@ export interface GitHubRequest {
 
 export type GhRunner = (args: string[], allowedExitCodes?: number[]) => Promise<string>;
 
-function valueFor(raw: Record<string, unknown>, name: string): unknown {
-  return raw[name] ?? raw[name.replace(/-/g, '_')];
-}
-
-function hasUnsupportedControl(value: string, multiline: boolean): boolean {
-  return [...value].some((char) => {
-    const code = char.charCodeAt(0);
-    if (code === 127 || code === 0) return true;
-    if (code >= 32) return false;
-    return !multiline || (char !== '\n' && char !== '\r' && char !== '\t');
-  });
-}
-
 function stringArg(
   raw: Record<string, unknown>,
   name: string,
   options: { required?: boolean; maxLength?: number; multiline?: boolean } = {},
 ): string | undefined {
-  const value = valueFor(raw, name);
+  const value = raw[name] ?? raw[name.replace(/-/g, '_')];
   if (value === undefined) {
     if (options.required) throw new Error(`--${name} is required`);
     return undefined;
   }
   if (typeof value !== 'string' || value.trim() === '') throw new Error(`--${name} must be a non-empty string`);
   const normalized = options.multiline ? value.trim() : value.trim().replace(/\s+/g, ' ');
-  if (hasUnsupportedControl(normalized, options.multiline === true)) {
+  if (
+    [...normalized].some((char) => {
+      const code = char.charCodeAt(0);
+      return code === 127 || code === 0 || (code < 32 && (!options.multiline || !'\n\r\t'.includes(char)));
+    })
+  ) {
     throw new Error(`--${name} contains unsupported control characters`);
   }
   if (normalized.length > (options.maxLength ?? 1_000)) throw new Error(`--${name} is too long`);
@@ -122,14 +116,14 @@ function stringArg(
 }
 
 function numberArg(raw: Record<string, unknown>): number {
-  const value = valueFor(raw, 'number') ?? raw.id;
+  const value = raw.number ?? raw.id;
   const parsed = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error('a positive PR or issue number is required');
   return parsed;
 }
 
 function limitArg(raw: Record<string, unknown>): number {
-  const value = valueFor(raw, 'limit');
+  const value = raw.limit;
   if (value === undefined) return 30;
   const parsed = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_LIST_LIMIT) {
@@ -146,9 +140,9 @@ function stateArg(raw: Record<string, unknown>, operation: GitHubOperation): Git
   return value as GitHubRequest['state'];
 }
 
-export function loadAllowedGitHubRepositories(reposPath = REPOS_PATH): Set<string> {
+function loadAllowedGitHubRepositories(): Set<string> {
   const repos = new Set<string>();
-  const lines = fs.readFileSync(reposPath, 'utf8').split(/\r?\n/);
+  const lines = fs.readFileSync(REPOS_PATH, 'utf8').split(/\r?\n/);
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -163,22 +157,13 @@ export function loadAllowedGitHubRepositories(reposPath = REPOS_PATH): Set<strin
     repos.add(repoPath);
   }
 
-  if (repos.size === 0) throw new Error(`no allowed GitHub repositories found in ${reposPath}`);
+  if (repos.size === 0) throw new Error(`no allowed GitHub repositories found in ${REPOS_PATH}`);
   return repos;
 }
 
-function repoArg(raw: Record<string, unknown>, reposPath: string): string {
+function parseGitHubRequest(operation: GitHubOperation, raw: Record<string, unknown>): GitHubRequest {
   const repo = stringArg(raw, 'repo', { required: true, maxLength: 200 })!;
-  if (!loadAllowedGitHubRepositories(reposPath).has(repo)) throw new Error(`GitHub repository is not allowed: ${repo}`);
-  return repo;
-}
-
-export function parseGitHubRequest(
-  operation: GitHubOperation,
-  raw: Record<string, unknown>,
-  reposPath = REPOS_PATH,
-): GitHubRequest {
-  const repo = repoArg(raw, reposPath);
+  if (!loadAllowedGitHubRepositories().has(repo)) throw new Error(`GitHub repository is not allowed: ${repo}`);
 
   switch (operation) {
     case 'pr-list':
@@ -247,7 +232,7 @@ export function buildGhEnvironment(source: NodeJS.ProcessEnv = process.env): Nod
   };
 }
 
-export const runGh: GhRunner = (args, allowedExitCodes = []) =>
+const runGh: GhRunner = (args, allowedExitCodes = []) =>
   new Promise((resolve, reject) => {
     execFile(
       resolveGhCli(),
@@ -294,10 +279,6 @@ function resultUrl(output: string): string {
   return url;
 }
 
-function requester(ctx: CallerContext): string {
-  return ctx.caller === 'agent' ? (ctx.requesterUserId ?? 'unattributed-agent') : 'host';
-}
-
 export async function executeGitHubRequest(
   request: GitHubRequest,
   ctx: CallerContext,
@@ -307,7 +288,7 @@ export async function executeGitHubRequest(
     operation: request.operation,
     repo: request.repo,
     number: request.number,
-    requestedBy: requester(ctx),
+    requestedBy: ctx.caller === 'agent' ? (ctx.requesterUserId ?? 'unattributed-agent') : 'host',
   };
   log.info('Host GitHub command started', audit);
 
@@ -394,41 +375,12 @@ export async function executeGitHubRequest(
   }
 }
 
-function registerGitHubCommand(name: string, operation: GitHubOperation, access: Access, description: string): void {
+for (const [operation, description] of COMMANDS) {
   register({
-    name,
+    name: `github-${operation}`,
     description,
-    access,
+    access: 'approval',
     parseArgs: (raw) => parseGitHubRequest(operation, raw),
     handler: (request, ctx) => executeGitHubRequest(request, ctx),
   });
 }
-
-registerGitHubCommand('github-pr-list', 'pr-list', 'approval', 'List pull requests in an allowed LBox repository.');
-registerGitHubCommand('github-pr-view', 'pr-view', 'approval', 'View a pull request in an allowed LBox repository.');
-registerGitHubCommand(
-  'github-pr-checks',
-  'pr-checks',
-  'approval',
-  'View pull request checks in an allowed LBox repository.',
-);
-registerGitHubCommand('github-issue-list', 'issue-list', 'approval', 'List issues in an allowed LBox repository.');
-registerGitHubCommand('github-issue-view', 'issue-view', 'approval', 'View an issue in an allowed LBox repository.');
-registerGitHubCommand(
-  'github-issue-create',
-  'issue-create',
-  'approval',
-  'Create an issue in an allowed LBox repository.',
-);
-registerGitHubCommand(
-  'github-pr-comment',
-  'pr-comment',
-  'approval',
-  'Comment on a pull request in an allowed LBox repository.',
-);
-registerGitHubCommand(
-  'github-issue-comment',
-  'issue-comment',
-  'approval',
-  'Comment on an issue in an allowed LBox repository.',
-);

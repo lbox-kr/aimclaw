@@ -1,60 +1,26 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import {
-  buildGhEnvironment,
-  executeGitHubRequest,
-  loadAllowedGitHubRepositories,
-  parseGitHubRequest,
-  type GhRunner,
-} from './lbox-github.js';
+import { lookup } from '../cli/registry.js';
+import { buildGhEnvironment, executeGitHubRequest, type GhRunner } from './lbox-github.js';
 
-const tempDirs: string[] = [];
-
-function reposFile(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aimclaw-github-'));
-  tempDirs.push(dir);
-  const file = path.join(dir, 'repos.txt');
-  fs.writeFileSync(
-    file,
-    ['frontend https://github.com/lbox-kr/frontend.git', 'server https://github.com/lbox-kr/server.git'].join('\n'),
-  );
-  return file;
-}
-
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
-});
+const repo = 'lbox-kr/lbox-server';
+const parse = (operation: string, args: Record<string, unknown>) => lookup(`github-${operation}`)!.parseArgs(args);
 
 describe('LBox GitHub repository policy', () => {
-  it('derives the exact allowlist from the host-synced repository list', () => {
-    expect([...loadAllowedGitHubRepositories(reposFile())]).toEqual(['lbox-kr/frontend', 'lbox-kr/server']);
+  it('accepts a host-synced repository', () => {
+    expect(parse('pr-list', { repo })).toMatchObject({ operation: 'pr-list', repo });
   });
 
   it('rejects repositories outside the allowlist and invalid targets', () => {
-    const file = reposFile();
-    expect(() => parseGitHubRequest('pr-list', { repo: 'other/private' }, file)).toThrow(/not allowed/);
-    expect(() => parseGitHubRequest('pr-view', { repo: 'lbox-kr/frontend', id: '../1' }, file)).toThrow(
-      /positive PR or issue number/,
-    );
+    expect(() => parse('pr-list', { repo: 'other/private' })).toThrow(/not allowed/);
+    expect(() => parse('pr-view', { repo, id: '../1' })).toThrow(/positive PR or issue number/);
   });
 
   it('bounds list and write input', () => {
-    const file = reposFile();
-    expect(parseGitHubRequest('pr-list', { repo: 'lbox-kr/frontend', state: 'all', limit: '100' }, file)).toMatchObject(
-      { state: 'all', limit: 100 },
-    );
-    expect(() => parseGitHubRequest('issue-list', { repo: 'lbox-kr/frontend', limit: '101' }, file)).toThrow(
-      /between 1 and 100/,
-    );
-    expect(() => parseGitHubRequest('issue-create', { repo: 'lbox-kr/frontend', title: 'x' }, file)).toThrow(
-      /--body is required/,
-    );
-    expect(() =>
-      parseGitHubRequest('issue-create', { repo: 'lbox-kr/frontend', title: 'x', body: 'x'.repeat(2_001) }, file),
-    ).toThrow(/--body is too long/);
+    expect(parse('pr-list', { repo, state: 'all', limit: '100' })).toMatchObject({ state: 'all', limit: 100 });
+    expect(() => parse('issue-list', { repo, limit: '101' })).toThrow(/between 1 and 100/);
+    expect(() => parse('issue-create', { repo, title: 'x' })).toThrow(/--body is required/);
+    expect(() => parse('issue-create', { repo, title: 'x', body: 'x'.repeat(2_001) })).toThrow(/--body is too long/);
   });
 });
 

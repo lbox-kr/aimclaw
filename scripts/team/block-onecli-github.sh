@@ -20,16 +20,10 @@ list_rules() {
   onecli rules list --max 100
 }
 
-rule_id() {
-  local rules="$1"
-  local name="$2"
-  jq -r --arg name "$name" '(.data? // .) | map(select(.name == $name)) | first | .id // empty' <<<"$rules"
-}
-
 for host in "${GITHUB_HOSTS[@]}"; do
   name="$RULE_PREFIX-$host"
   rules="$(list_rules)"
-  id="$(rule_id "$rules" "$name")"
+  id="$(jq -r --arg name "$name" '(.data? // .) | map(select(.name == $name)) | first | .id // empty' <<<"$rules")"
 
   if [ -n "$id" ]; then
     onecli rules update \
