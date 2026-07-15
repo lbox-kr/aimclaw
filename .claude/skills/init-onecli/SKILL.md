@@ -278,24 +278,24 @@ onecli agents secrets --id "$AGENT_ID"
 - `<new-secret-id>` — the `id` from `onecli secrets list`
 - Multiple new secrets: append them comma-separated before the `printf` step
 
-### git over HTTPS
+### AimClaw GitHub
 
-OneCLI's proxy injects credentials proactively — `injections_applied=1` appears in `docker logs onecli` even when git sends no auth header. However, OneCLI sets `SSL_CERT_FILE` for Node/Python/Deno but not `GIT_SSL_CAINFO`. Without it, git rejects the OneCLI MITM certificate.
+Do not add GitHub credentials or `GH_TOKEN` stubs to OneCLI. AimClaw keeps the
+GitHub login in the Mac host keychain and exposes only the bounded
+`ncl github ...` operations from `container/skills/team-github/`. Complete
+`gh auth login --hostname github.com` and `gh auth setup-git --hostname github.com`
+on the host before installing repository sync.
 
-**Auth format matters**: GitHub's git smart HTTP protocol (`github.com`) requires `Basic` auth, not `Bearer`. GitHub's REST API (`api.github.com`) accepts `Bearer`. These must be configured as separate secrets with different formats — see `/add-github` for the full setup.
+Apply the project-scoped GitHub block rules after OneCLI is configured, including
+when an older GitHub OAuth or GitHub App connection already exists:
 
-If an agent uses `git` or `gh`, add to `data/v2-sessions/<agent-group-id>/.claude-shared/settings.json`:
-
-```json
-"GIT_SSL_CAINFO": "/tmp/onecli-combined-ca.pem",
-"GIT_TERMINAL_PROMPT": "0",
-"GIT_CONFIG_COUNT": "1",
-"GIT_CONFIG_KEY_0": "credential.helper",
-"GIT_CONFIG_VALUE_0": "",
-"GH_TOKEN": "ghp_onecli_proxy_replaces_this"
+```bash
+bash scripts/team/block-onecli-github.sh
 ```
 
-**Debugging injection**: `docker logs onecli 2>&1 | grep "github.com"` shows every request with `injections_applied=N` and the HTTP status. If `injections_applied=1` but status is still 401, the injected credential value is wrong or uses the wrong auth format for that endpoint.
+The script is idempotent and must succeed before AimClaw is considered verified.
+It blocks container traffic to `api.github.com` and `github.com` before OneCLI can
+inject credentials; it does not delete connections that another project may use.
 
 ## Troubleshooting
 

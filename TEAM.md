@@ -151,9 +151,17 @@ Slack thread에서는 네이티브 `Typing...` 상태를 우선 사용한다. �
 3. 코딩 에이전트가 `.env` 작성, `bash nanoclaw.sh`, Slack wiring과 응답 확인을 진행한다.
    초기 그룹 메모리에 사용자 전용 봇이나 NanoClaw 정체성이 생성되지 않았는지
    확인한다.
-4. GitHub 개인 계정 연결을 완료한 뒤 호스트 저장소 동기화를 설치하고, 읽기 전용 작업공간을 에이전트 그룹에 연결한다.
+4. GitHub 개인 계정을 호스트 `gh`에 연결한 뒤 저장소 동기화를 설치하고, 읽기
+   전용 작업공간을 에이전트 그룹에 연결한다. GitHub credential은 OneCLI에
+   등록하지 않으며, 기존 연결이 있더라도 AimClaw 프로젝트에서는 차단한다.
 
    ```bash
+   bash scripts/team/block-onecli-github.sh
+
+   gh auth login --hostname github.com --git-protocol https --web
+   gh auth setup-git --hostname github.com
+   gh auth status --active --hostname github.com
+
    mkdir -p ~/nanoclaw-deploy
    bash scripts/team/install-repo-sync.sh
 
@@ -230,6 +238,31 @@ aws sso login --profile lbox-system
 bash scripts/team/sync-repos.sh
 cat ~/lbox-repos/.aimclaw-sync-status.json
 tail -100 ~/.local/state/aimclaw-repo-sync/sync.log
+```
+
+## GitHub
+
+PR·이슈·checks 조회와 이슈 생성·코멘트는 Mac mini에 로그인된 `gh` 계정으로
+실행한다. 컨테이너에는 `gh` binary, credential, `~/.config/gh`를 전달하지 않고
+`ncl github ...`의 고정된 호스트 명령만 제공한다. 허용 저장소는 코드 참조 저장소와
+같은 `container/skills/lbox-product-code-search/repos.txt`에서 관리한다.
+
+`scripts/team/block-onecli-github.sh`는 AimClaw의 활성 OneCLI 프로젝트에서
+`api.github.com`과 `github.com`을 차단한다. 따라서 기존 GitHub OAuth/GitHub App
+연결이 남아 있어도 컨테이너 요청은 credential 주입 전에 거부된다. 스크립트는
+재실행해도 같은 규칙을 갱신하므로 OneCLI 초기화나 복구 뒤 다시 실행한다.
+
+현재 GitHub 도구는 기존 외부 서비스 정책과 같이 관리자만 사용할 수 있다. 일반
+사용자에게 `Bash`를 허용해 우회시키지 않는다.
+
+현재 지원하는 쓰기는 이슈 생성과 새 PR·이슈 코멘트다. merge, close, review 승인,
+workflow, release, 저장소 설정과 secret 작업은 지원하지 않는다. 모든 GitHub 활동은
+호스트에 로그인된 계정으로 기록되므로 운영 계정을 바꾸면 다음을 다시 실행한다.
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git --hostname github.com
+gh auth status --active --hostname github.com
 ```
 
 ## Upstream 갱신
