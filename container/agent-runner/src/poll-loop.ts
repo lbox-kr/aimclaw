@@ -8,15 +8,16 @@ import {
   type MessageInRow,
 } from './db/messages-in.js';
 import { hasTaskSend, writeMessageOut } from './db/messages-out.js';
-import { clearTurnSends, wasSentThisTurn } from './turn-sends.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import {
+  clearTurnSends,
   clearContinuation,
   clearCurrentInReplyTo,
   migrateLegacyContinuation,
   setContinuation,
   setCurrentInReplyTo,
   setCurrentRequestMessageId,
+  wasSentThisTurn,
 } from './db/session-state.js';
 import {
   formatMessages,

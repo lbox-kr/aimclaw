@@ -9,6 +9,8 @@
  * providers is therefore lossless: each provider's last thread stays
  * on file and resumes cleanly if the user flips back.
  */
+import crypto from 'crypto';
+
 import { getOutboundDb } from './connection.js';
 
 const LEGACY_KEY = 'sdk_session_id';
@@ -92,6 +94,8 @@ export function clearContinuation(providerName: string): void {
  */
 const IN_REPLY_TO_KEY = 'current_in_reply_to';
 const REQUEST_MESSAGE_KEY = 'current_request_message_id';
+const TURN_SEND_KEY_PREFIX = 'turn_send:';
+const TURN_SEND_SEPARATOR = '\0';
 
 /**
  * Ignore a stamp older than this. The poll loop clears the stamp in a
@@ -99,7 +103,16 @@ const REQUEST_MESSAGE_KEY = 'current_request_message_id';
  * the guard stops a later out-of-batch read from picking up a dead stamp.
  * Generous so a long-running batch's late sends still stamp correctly.
  */
-const IN_REPLY_TO_MAX_AGE_MS = 30 * 60 * 1000;
+const ACTIVE_STAMP_MAX_AGE_MS = 30 * 60 * 1000;
+
+function getFreshValue(key: string): string | null {
+  const row = getOutboundDb().prepare('SELECT value, updated_at FROM session_state WHERE key = ?').get(key) as
+    | { value: string; updated_at: string }
+    | undefined;
+  if (!row) return null;
+  const age = Date.now() - new Date(row.updated_at).getTime();
+  return Number.isFinite(age) && age <= ACTIVE_STAMP_MAX_AGE_MS ? row.value : null;
+}
 
 export function setCurrentInReplyTo(id: string | null): void {
   if (id === null) {
@@ -114,13 +127,7 @@ export function clearCurrentInReplyTo(): void {
 }
 
 export function getCurrentInReplyTo(): string | null {
-  const row = getOutboundDb()
-    .prepare('SELECT value, updated_at FROM session_state WHERE key = ?')
-    .get(IN_REPLY_TO_KEY) as { value: string; updated_at: string } | undefined;
-  if (!row) return null;
-  const age = Date.now() - new Date(row.updated_at).getTime();
-  if (!Number.isFinite(age) || age > IN_REPLY_TO_MAX_AGE_MS) return null;
-  return row.value;
+  return getFreshValue(IN_REPLY_TO_KEY);
 }
 
 /**
@@ -131,4 +138,41 @@ export function getCurrentInReplyTo(): string | null {
 export function setCurrentRequestMessageId(id: string | null): void {
   if (id === null) deleteValue(REQUEST_MESSAGE_KEY);
   else setValue(REQUEST_MESSAGE_KEY, id);
+}
+
+function turnSendKey(channelType: string | null, platformId: string | null, threadId: string | null, text: string) {
+  const requestMessageId = getFreshValue(REQUEST_MESSAGE_KEY);
+  if (!requestMessageId) return null;
+  const digest = crypto
+    .createHash('sha256')
+    .update([requestMessageId, channelType ?? '', platformId ?? '', threadId ?? '', text].join(TURN_SEND_SEPARATOR))
+    .digest('hex');
+  return [`${TURN_SEND_KEY_PREFIX}${digest}`, requestMessageId] as const;
+}
+
+/** Record a user-facing message delivered this turn via send_message. */
+export function recordTurnSend(
+  channelType: string | null,
+  platformId: string | null,
+  threadId: string | null,
+  text: string,
+): void {
+  const record = turnSendKey(channelType, platformId, threadId, text);
+  if (record) setValue(...record);
+}
+
+/** True if this exact text was already sent to this destination this turn. */
+export function wasSentThisTurn(
+  channelType: string | null,
+  platformId: string | null,
+  threadId: string | null,
+  text: string,
+): boolean {
+  const record = turnSendKey(channelType, platformId, threadId, text);
+  return record !== null && getValue(record[0]) !== undefined;
+}
+
+/** Clear the record — called when a turn completes. */
+export function clearTurnSends(): void {
+  getOutboundDb().prepare("DELETE FROM session_state WHERE key GLOB 'turn_send:*'").run();
 }
